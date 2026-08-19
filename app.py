@@ -1,13 +1,32 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
-import sys
-sys.path.append('src')
+import requests
 
-from crop_data import crops
-from soil_data import soils
-from weather_simulator import create_transition_matrix
-from decision_engine import make_decision
+from src.crop_data import crops
+from src.soil_data import soils
+from src.weather_simulator import create_transition_matrix
+from src.decision_engine import make_decision
+API_URL = "http://127.0.0.1:8000"
+def get_api_decision(crop_name, soil_type, current_moisture, rainfall_24h, transition_matrix):
+    payload = {
+        "crop_name": crop_name,
+        "soil_type": soil_type,
+        "current_moisture_mm": current_moisture,
+        "rainfall_yesterday_mm": rainfall_24h,
+        "transition_matrix": transition_matrix.tolist(),
+        "num_simulations": 500,
+        "days_to_simulate": 7
+    }
+
+    response = requests.post(
+        f"{API_URL}/api/v1/decision",
+        json=payload
+    )
+
+    response.raise_for_status()
+
+    return response.json()
 
 # Page config
 st.set_page_config(
@@ -103,17 +122,15 @@ with col2:
     if st.button("🔮 Get Sowing Recommendation", type="primary", use_container_width=True):
         with st.spinner("Running 500 simulations..."):
             transition_matrix = create_transition_matrix(week_number=3)
+            result = get_api_decision(
+    crop_name=crop_name,
+    soil_type=soil_type,
+    current_moisture=current_moisture,
+    rainfall_24h=rainfall_24h,
+    transition_matrix=transition_matrix
+)
             
-            result = make_decision(
-                crop_name=crop_name,
-                soil_type=soil_type,
-                current_moisture_mm=current_moisture,
-                rainfall_yesterday_mm=rainfall_24h,
-                transition_matrix=transition_matrix,
-                num_simulations=500,
-                days_to_simulate=7
-            )
-            
+                       
             st.session_state['decision_result'] = result
             st.session_state['current_moisture'] = current_moisture
             st.session_state['crop_display'] = crop_display
@@ -127,7 +144,7 @@ if 'decision_result' in st.session_state:
     crop_name = st.session_state['crop_name']
     
     st.markdown("---")
-    st.markdown(f"## {result['color']} DECISION: {result['decision']}")
+    st.markdown(f"## 🌾 DECISION: {result['decision']}")
     
     col1, col2, col3 = st.columns(3)
     
@@ -149,50 +166,43 @@ if 'decision_result' in st.session_state:
             f"{result['germ_prob_soybean']*100:.0f}%"
         )
     
-    # Visualization
-    st.markdown("### 📈 Soil Moisture Trajectories (500 Simulations)")
-    st.write("Each line represents one possible future. Green zone = adequate moisture for germination.")
+       # Decision Analysis
+    st.markdown("### 📊 Decision Analysis")
+
+    analysis_col1, analysis_col2 = st.columns(2)
+
+    with analysis_col1:
+        st.metric(
+            "Current Soil Moisture",
+            f"{result['current_moisture']:.1f} mm"
+        )
+
+    with analysis_col2:
+        st.metric(
+            "Minimum Moisture Required",
+            f"{result['min_moisture_required']:.1f} mm"
+        )
+
+    st.info(
+        f"The API estimates a {result['confidence']*100:.1f}% "
+        f"confidence in this recommendation."
+    )
     
-    fig, ax = plt.subplots(figsize=(10, 5))
-    
-    for i in range(0, min(100, result['trajectories'].shape[0])):
-        ax.plot(result['trajectories'][i, :], alpha=0.15, color='blue', linewidth=0.5)
-    
-    mean_trajectory = result['trajectories'].mean(axis=0)
-    ax.plot(mean_trajectory, color='red', linewidth=2, label='Average')
-    
-    ax.axhline(y=result['min_moisture_required'], color='green', 
-               linestyle='--', linewidth=2, label='Min Moisture for Germination')
-    
-    ax.axhspan(result['min_moisture_required'], 80, alpha=0.1, color='green')
-    
-    ax.set_xlabel('Days from Today')
-    ax.set_ylabel('Soil Moisture (mm)')
-    ax.set_title('Soil Moisture Forecast: Monte Carlo Simulation')
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    
-    st.pyplot(fig)
-    
-    # Probability distribution
-    st.markdown("### 🎲 Final Moisture Distribution (Day 7)")
-    
-    fig2, ax2 = plt.subplots(figsize=(10, 4))
-    final_moistures = result['trajectories'][:, -1]
-    
-    ax2.hist(final_moistures, bins=20, alpha=0.7, color='blue', edgecolor='black')
-    ax2.axvline(x=result['min_moisture_required'], color='green', 
-                linestyle='--', linewidth=2, label='Min Moisture Required')
-    
-    above_threshold = (final_moistures >= result['min_moisture_required']).sum() / len(final_moistures)
-    
-    ax2.set_xlabel('Soil Moisture (mm)')
-    ax2.set_ylabel('Number of Simulations')
-    ax2.set_title(f'Distribution of Soil Moisture after 7 Days\n{above_threshold*100:.0f}% of simulations above germination threshold')
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-    
-    st.pyplot(fig2)
+        # Decision comparison
+    st.markdown("### 📊 Decision Analysis")
+
+    chart_data = {
+        "Sow Today": result["germ_prob_today"] * 100,
+        "Wait 5 Days": result["germ_prob_wait"] * 100,
+        "Soybean": result["germ_prob_soybean"] * 100
+    }
+
+    st.bar_chart(chart_data)
+
+    st.info(
+        f"Recommendation confidence: "
+        f"{result['confidence'] * 100:.1f}%"
+    )
     
     # Reasoning
     st.markdown("### 💡 Reasoning")
