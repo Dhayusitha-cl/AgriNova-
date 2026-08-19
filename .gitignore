@@ -18,3 +18,6 @@ Thumbs.db
 
 # Large/raw datasets
 data/raw/*.nc
+
+# Generated processed datasets
+data/processed/*.csv
