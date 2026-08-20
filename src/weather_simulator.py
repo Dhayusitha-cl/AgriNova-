@@ -1,99 +1,367 @@
+"""
+Weather simulation utilities for AgriNova.
+
+This module provides:
+    1. Markov-chain rainfall-state simulation
+    2. Empirical rainfall-amount sampling
+
+The simulated rainfall values are scenarios, not forecasts
+or guarantees.
+
+Historical rainfall data is used to represent observed
+rainfall amounts, while the Markov transition matrix
+represents rainfall-state persistence.
+"""
+
 import numpy as np
 
-def create_transition_matrix(week_number, district='yavatmal'):
+from src.rainfall_amount_calibration import (
+    load_processed_rainfall,
+    sample_rainfall_amounts,
+)
+
+
+RAINFALL_STATES = ["dry", "drizzle", "rain"]
+
+
+def create_transition_matrix(
+    week_number,
+    district="yavatmal",
+    use_calibrated=False,
+):
     """
-    Returns 3x3 transition matrix for Markov Chain
-    Rows: today's weather, Columns: tomorrow's weather
-    States: dry, drizzle, rain
+    Return the rainfall-state transition matrix.
+
+    Parameters
+    ----------
+    week_number : int
+        Forecast week number.
+
+    district : str
+        District identifier.
+
+    use_calibrated : bool
+        If True, use the transition matrix calibrated from
+        historical processed rainfall data.
+
+        If False, use the existing project transition matrices.
+
+    Returns
+    -------
+    numpy.ndarray
+        3x3 transition matrix.
+
+    Notes
+    -----
+    The existing week-based matrices are retained as fallback
+    assumptions.
+
+    When use_calibrated=True, the matrix is estimated from
+    historical rainfall observations using markov_calibration.py.
     """
-    if week_number == 1:
-        return np.array([
+
+    if use_calibrated:
+
+        if district.lower() != "yavatmal":
+            raise ValueError(
+                "Historical calibration is currently available "
+                "only for Yavatmal."
+            )
+
+        from src.markov_calibration import (
+            calculate_multi_year_transition_matrix
+        )
+
+        return calculate_multi_year_transition_matrix(
+            processed_dir="data/processed"
+        )
+
+    matrices = {
+        1: np.array([
             [0.75, 0.18, 0.07],
             [0.55, 0.30, 0.15],
-            [0.40, 0.35, 0.25]
-        ])
-    elif week_number == 2:
-        return np.array([
+            [0.40, 0.35, 0.25],
+        ]),
+
+        2: np.array([
             [0.65, 0.25, 0.10],
             [0.45, 0.35, 0.20],
-            [0.35, 0.35, 0.30]
-        ])
-    elif week_number == 3:
-        return np.array([
+            [0.35, 0.35, 0.30],
+        ]),
+
+        3: np.array([
             [0.55, 0.30, 0.15],
             [0.40, 0.35, 0.25],
-            [0.30, 0.35, 0.35]
-        ])
-    elif week_number == 4:
-        return np.array([
+            [0.30, 0.35, 0.35],
+        ]),
+
+        4: np.array([
             [0.50, 0.32, 0.18],
             [0.35, 0.38, 0.27],
-            [0.28, 0.35, 0.37]
-        ])
-    else:
-        return np.array([
-            [0.45, 0.35, 0.20],
-            [0.30, 0.40, 0.30],
-            [0.25, 0.35, 0.40]
-        ])
-
-
-def generate_weather_sequence(transition_matrix, num_days):
-    """
-    Generate weather sequence using Markov Chain
-    Returns list of dicts with state, rainfall, tmax, tmin
-    """
-    states = ['dry', 'drizzle', 'rain']
-    
-    rainfall_amounts = {
-        'dry': lambda: 0,
-        'drizzle': lambda: np.random.uniform(1, 10),
-        'rain': lambda: np.random.uniform(10, 40)
+            [0.28, 0.35, 0.37],
+        ]),
     }
-    
-    temps = {
-        'dry': (35, 26),
-        'drizzle': (32, 24),
-        'rain': (28, 22)
-    }
-    
-    current_state_idx = np.random.choice([0, 1, 2], p=[0.5, 0.3, 0.2])
-    weather_sequence = []
-    
-    for day in range(num_days):
-        state = states[current_state_idx]
-        rainfall = rainfall_amounts[state]()
-        tmax, tmin = temps[state]
-        
-        weather_sequence.append({
-            'state': state,
-            'rainfall': rainfall,
-            'tmax': tmax + np.random.uniform(-2, 2),
-            'tmin': tmin + np.random.uniform(-1, 1)
-        })
-        
-        current_state_idx = np.random.choice(
-            [0, 1, 2], 
-            p=transition_matrix[current_state_idx]
+
+    if week_number in matrices:
+        return matrices[week_number].copy()
+
+    return np.array([
+        [0.45, 0.35, 0.20],
+        [0.30, 0.40, 0.30],
+        [0.25, 0.35, 0.40],
+    ])
+
+def validate_transition_matrix(transition_matrix):
+    """
+    Validate a rainfall-state transition matrix.
+
+    Parameters
+    ----------
+    transition_matrix : array-like
+        Expected shape is (3, 3).
+
+    Returns
+    -------
+    numpy.ndarray
+        Validated floating-point matrix.
+    """
+
+    matrix = np.asarray(
+        transition_matrix,
+        dtype=float,
+    )
+
+    if matrix.shape != (3, 3):
+        raise ValueError(
+            "Transition matrix must have shape (3, 3)."
         )
-    
-    return weather_sequence
+
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError(
+            "Transition matrix must contain finite values."
+        )
+
+    if np.any(matrix < 0) or np.any(matrix > 1):
+        raise ValueError(
+            "Transition probabilities must be between 0 and 1."
+        )
+
+    row_sums = matrix.sum(axis=1)
+
+    if not np.allclose(
+        row_sums,
+        1.0,
+        atol=1e-5,
+    ):
+        raise ValueError(
+            "Each transition-matrix row must sum to 1."
+        )
+
+    return matrix / row_sums[:, np.newaxis]
 
 
-def calculate_et_hargreaves(tmax, tmin, latitude=20.39, day_of_year=180):
+def generate_markov_states(
+    transition_matrix,
+    num_days,
+    initial_state="dry",
+    random_seed=None,
+):
     """
-    Calculate reference evapotranspiration using Hargreaves equation
+    Generate future rainfall states using a Markov chain.
+
+    Parameters
+    ----------
+    transition_matrix : array-like
+        3x3 rainfall-state transition matrix.
+
+    num_days : int
+        Number of days to simulate.
+
+    initial_state : str
+        Initial rainfall state.
+
+    random_seed : int or None
+        Optional random seed for reproducibility.
+
+    Returns
+    -------
+    list[str]
+        Simulated rainfall states.
     """
-    tavg = (tmax + tmin) / 2
-    Ra = 40 + 5 * np.sin(2 * np.pi * (day_of_year - 100) / 365)
-    et0 = 0.0023 * Ra * np.sqrt(max(tmax - tmin, 1)) * (tavg + 17.8)
-    return et0
+
+    if num_days <= 0:
+        raise ValueError(
+            "num_days must be greater than zero."
+        )
+
+    if initial_state not in RAINFALL_STATES:
+        raise ValueError(
+            f"Unknown initial state: {initial_state}"
+        )
+
+    matrix = validate_transition_matrix(
+        transition_matrix
+    )
+
+    rng = np.random.default_rng(random_seed)
+
+    current_state = RAINFALL_STATES.index(
+        initial_state
+    )
+
+    sequence = [initial_state]
+
+    for _ in range(num_days - 1):
+        current_state = rng.choice(
+            len(RAINFALL_STATES),
+            p=matrix[current_state],
+        )
+
+        sequence.append(
+            RAINFALL_STATES[current_state]
+        )
+
+    return sequence
 
 
-def calculate_et_daily(tmax, tmin):
+def rainfall_amount_from_state(
+    state,
+    random_seed=None,
+):
     """
-    Simplified daily ET calculation
+    Generate a rainfall amount from a rainfall state.
+
+    This function is retained as a simple utility.
+
+    IMPORTANT
+    ---------
+    These ranges are simulation assumptions.
+    They are not presented as observed IMD rainfall
+    distributions.
+
+    For calibrated scenarios, use
+    ``generate_rainfall_scenario`` instead.
     """
-    tavg = (tmax + tmin) / 2
-    et = 0.5 * (tavg - 10)
-    return max(1, min(et, 10))
+
+    if state not in RAINFALL_STATES:
+        raise ValueError(
+            f"Unknown rainfall state: {state}"
+        )
+
+    rng = np.random.default_rng(random_seed)
+
+    if state == "dry":
+        return 0.0
+
+    if state == "drizzle":
+        return float(
+            rng.uniform(0.1, 10.0)
+        )
+
+    return float(
+        rng.uniform(10.0, 40.0)
+    )
+
+
+def generate_rainfall_scenario(
+    transition_matrix,
+    num_days,
+    initial_state="dry",
+    random_seed=None,
+    rainfall_data=None,
+):
+    """
+    Generate one future rainfall scenario.
+
+    The process is:
+
+        Markov chain
+            ↓
+        rainfall states
+            ↓
+        empirical rainfall amounts
+
+    Parameters
+    ----------
+    transition_matrix : array-like
+        3x3 rainfall-state transition matrix.
+
+    num_days : int
+        Number of days to simulate.
+
+    initial_state : str
+        Starting rainfall state.
+
+    random_seed : int or None
+        Random seed for reproducibility.
+
+    rainfall_data : pandas.DataFrame or None
+        Processed historical rainfall data.
+
+        If None, the project rainfall dataset is loaded
+        automatically.
+
+    Returns
+    -------
+    list[dict]
+        Daily rainfall scenario.
+
+    Notes
+    -----
+    The output represents a plausible simulated scenario.
+    It is not a deterministic weather forecast.
+    """
+
+    if num_days <= 0:
+        raise ValueError(
+            "num_days must be greater than zero."
+        )
+
+    states = generate_markov_states(
+        transition_matrix=transition_matrix,
+        num_days=num_days,
+        initial_state=initial_state,
+        random_seed=random_seed,
+    )
+
+    if rainfall_data is None:
+        rainfall_data = load_processed_rainfall()
+
+    rng = np.random.default_rng(
+        random_seed
+    )
+
+    scenario = []
+
+    for day, state in enumerate(
+        states,
+        start=1,
+    ):
+
+        if state == "dry":
+            rainfall = 0.0
+
+        else:
+            seed = int(
+                rng.integers(
+                    0,
+                    2**32 - 1,
+                )
+            )
+
+            rainfall = float(
+                sample_rainfall_amounts(
+                    rainfall_data,
+                    state,
+                    size=1,
+                    random_seed=seed,
+                )[0]
+            )
+
+        scenario.append({
+            "day": day,
+            "rainfall_state": state,
+            "rainfall_mm": rainfall,
+        })
+
+    return scenario
