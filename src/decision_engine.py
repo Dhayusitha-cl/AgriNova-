@@ -1,8 +1,7 @@
 """
 CropLogic-Saathi decision engine.
 
-Core flow:
-
+Flow:
     calibrated rainfall transitions
         -> Monte Carlo rainfall scenarios
         -> soil-water balance
@@ -10,9 +9,7 @@ Core flow:
         -> economic comparison
         -> SOW / WAIT / SWITCH decision
 
-Important:
-    Simulation probabilities are scenario estimates, not guarantees.
-    Economic assumptions are kept separate from the physical simulation.
+Simulation probabilities are estimates, not guarantees.
 """
 
 import numpy as np
@@ -24,10 +21,6 @@ from .soil_water import simulate_soil_water
 from .crop_establishment import evaluate_establishment
 from .economic_engine import compare_all_decisions
 
-
-# ============================================================
-# INPUT VALIDATION
-# ============================================================
 
 def _validate_inputs(
     crop_name,
@@ -41,28 +34,21 @@ def _validate_inputs(
     """Validate decision-engine inputs."""
 
     if crop_name not in crops:
-        raise ValueError(
-            f"Unknown crop: {crop_name}"
-        )
+        raise ValueError(f"Unknown crop: {crop_name}")
 
     if soil_type not in soils:
-        raise ValueError(
-            f"Unknown soil type: {soil_type}"
-        )
+        raise ValueError(f"Unknown soil type: {soil_type}")
 
     if current_moisture_mm < 0:
         raise ValueError(
             "current_moisture_mm cannot be negative."
         )
 
-    field_capacity = soils[soil_type][
-        "field_capacity_mm"
-    ]
+    field_capacity = soils[soil_type]["field_capacity_mm"]
 
     if current_moisture_mm > field_capacity:
         raise ValueError(
-            "current_moisture_mm cannot exceed "
-            "field capacity."
+            "current_moisture_mm cannot exceed field capacity."
         )
 
     if rainfall_yesterday_mm < 0:
@@ -82,8 +68,7 @@ def _validate_inputs(
 
     if np.any(matrix < 0) or np.any(matrix > 1):
         raise ValueError(
-            "transition probabilities must be "
-            "between 0 and 1."
+            "transition probabilities must be between 0 and 1."
         )
 
     if not np.allclose(
@@ -106,42 +91,23 @@ def _validate_inputs(
         )
 
 
-# ============================================================
-# DAILY EVAPOTRANSPIRATION
-# ============================================================
-
-def calculate_daily_et(
-    rainfall_scenario,
-):
+def calculate_daily_et(rainfall_scenario):
     """
-    Estimate daily evapotranspiration.
+    Calculate daily evapotranspiration.
 
-    The current rainfall scenarios do not contain temperature
-    information, so a transparent constant ET assumption is used.
-
-    This is a model assumption, not a measured value.
+    Temperature is not currently part of the rainfall scenario,
+    so a transparent fixed daily ET assumption is used.
     """
 
-    et_mm_per_day = 5.0
+    return [5.0 for _ in rainfall_scenario]
 
-    return [
-        et_mm_per_day
-        for _ in rainfall_scenario
-    ]
-
-
-# ============================================================
-# RAINFALL -> SOIL WATER
-# ============================================================
 
 def simulate_rainfall_soil_water(
     rainfall_scenario,
     soil_type,
     initial_moisture_mm,
 ):
-    """
-    Convert one rainfall scenario into a soil-water trajectory.
-    """
+    """Convert a rainfall scenario into a soil-water trajectory."""
 
     rainfall_series = [
         float(day["rainfall_mm"])
@@ -160,10 +126,6 @@ def simulate_rainfall_soil_water(
     )
 
 
-# ============================================================
-# ESTABLISHMENT PROBABILITY
-# ============================================================
-
 def _scenario_establishment_probability(
     scenarios,
     crop_name,
@@ -171,24 +133,32 @@ def _scenario_establishment_probability(
     initial_moisture_mm,
 ):
     """
-    Calculate establishment probability across
-    Monte Carlo weather scenarios.
+    Calculate establishment probability over Monte Carlo scenarios.
 
-    Returns:
-        probability:
-            Fraction of scenarios where establishment succeeds.
-
-        trajectories:
-            Simulated soil-water trajectories.
+    Every scenario must contain at least as many days as the crop's
+    germination period.
     """
-
-    if not scenarios:
-        return 0.0, np.asarray([])
 
     successful = 0
     trajectories = []
 
+    crop_germination_days = int(
+        crops[crop_name]["germination_days"]
+    )
+
     for scenario in scenarios:
+
+        # Protect against an accidentally short scenario.
+        scenario = list(scenario)
+
+        if len(scenario) < crop_germination_days:
+            scenario.extend(
+                [{"rainfall_mm": 0.0}]
+                * (
+                    crop_germination_days
+                    - len(scenario)
+                )
+            )
 
         soil_water_results = simulate_rainfall_soil_water(
             rainfall_scenario=scenario,
@@ -205,22 +175,19 @@ def _scenario_establishment_probability(
         if establishment["establishment_success"]:
             successful += 1
 
-        trajectory = [
-            initial_moisture_mm
-        ]
+        trajectory = [float(initial_moisture_mm)]
 
         trajectory.extend(
-            result["final_water_mm"]
+            float(result["final_water_mm"])
             for result in soil_water_results
         )
 
-        trajectories.append(
-            trajectory
-        )
+        trajectories.append(trajectory)
 
-    probability = (
-        successful / len(scenarios)
-    )
+    if not scenarios:
+        return 0.0, np.empty((0, 0))
+
+    probability = successful / len(scenarios)
 
     return (
         float(probability),
@@ -231,19 +198,12 @@ def _scenario_establishment_probability(
     )
 
 
-# ============================================================
-# INITIAL RAINFALL STATE
-# ============================================================
-
-def _get_initial_state(
-    rainfall_yesterday_mm,
-):
+def _get_initial_state(rainfall_yesterday_mm):
     """
-    Convert recent rainfall into the starting
-    Markov rainfall state.
+    Convert recent rainfall into the starting rainfall state.
 
-    Thresholds are current model assumptions and should
-    eventually be calibrated against project rainfall data.
+    These thresholds are model assumptions and should eventually
+    be calibrated against project rainfall-state preprocessing.
     """
 
     if rainfall_yesterday_mm <= 0:
@@ -255,28 +215,21 @@ def _get_initial_state(
     return "rain"
 
 
-# ============================================================
-# DECISION CONFIDENCE
-# ============================================================
-
 def _calculate_confidence(
     germ_prob_today,
     germ_prob_wait,
     germ_prob_soybean,
 ):
     """
-    Calculate a simple decision-confidence indicator.
+    Calculate a simple separation-based confidence indicator.
 
-    This measures separation between the best and
-    second-best establishment probabilities.
-
-    It is NOT a statistical confidence interval.
+    This is NOT a statistical confidence interval.
     """
 
     probabilities = [
-        germ_prob_today,
-        germ_prob_wait,
-        germ_prob_soybean,
+        float(germ_prob_today),
+        float(germ_prob_wait),
+        float(germ_prob_soybean),
     ]
 
     ordered = sorted(
@@ -287,9 +240,7 @@ def _calculate_confidence(
     if len(ordered) < 2:
         return 0.0
 
-    separation = (
-        ordered[0] - ordered[1]
-    )
+    separation = ordered[0] - ordered[1]
 
     return float(
         min(
@@ -302,9 +253,130 @@ def _calculate_confidence(
     )
 
 
-# ============================================================
-# MAIN DECISION FUNCTION
-# ============================================================
+def _safe_wait_trajectories(
+    wait_scenarios,
+    wait_days,
+    crop_name,
+    soil_type,
+    current_moisture_mm,
+):
+    """
+    Evaluate WAIT scenarios.
+
+    The scenario contains:
+
+        WAIT period
+            +
+        crop establishment period
+
+    Therefore the full scenario is simulated, but establishment
+    is evaluated only after the waiting period.
+
+    Always returns one trajectory per Monte Carlo simulation.
+    """
+
+    wait_trajectories = []
+    successful = 0
+
+    crop_germination_days = int(
+        crops[crop_name]["germination_days"]
+    )
+
+    for scenario in wait_scenarios:
+
+        scenario = list(scenario)
+
+        # -----------------------------------------------------
+        # WAIT PERIOD
+        # -----------------------------------------------------
+
+        wait_weather = scenario[:wait_days]
+
+        wait_results = simulate_rainfall_soil_water(
+            rainfall_scenario=wait_weather,
+            soil_type=soil_type,
+            initial_moisture_mm=current_moisture_mm,
+        )
+
+        if wait_results:
+            wait_moisture = float(
+                wait_results[-1]["final_water_mm"]
+            )
+        else:
+            wait_moisture = float(
+                current_moisture_mm
+            )
+
+        # -----------------------------------------------------
+        # POST-WAIT ESTABLISHMENT PERIOD
+        # -----------------------------------------------------
+
+        future_scenario = scenario[wait_days:]
+
+        if len(future_scenario) < crop_germination_days:
+            future_scenario = list(
+                future_scenario
+            )
+
+            while len(future_scenario) < crop_germination_days:
+                future_scenario.append(
+                    {
+                        "rainfall_mm": 0.0
+                    }
+                )
+
+        future_results = simulate_rainfall_soil_water(
+            rainfall_scenario=future_scenario,
+            soil_type=soil_type,
+            initial_moisture_mm=wait_moisture,
+        )
+
+        establishment = evaluate_establishment(
+            soil_water_results=future_results,
+            crop=crop_name,
+            soil_type=soil_type,
+        )
+
+        if establishment["establishment_success"]:
+            successful += 1
+
+        # -----------------------------------------------------
+        # FULL WAIT TRAJECTORY
+        # -----------------------------------------------------
+
+        trajectory = [
+            float(current_moisture_mm)
+        ]
+
+        trajectory.extend(
+            float(result["final_water_mm"])
+            for result in wait_results
+        )
+
+        trajectory.extend(
+            float(result["final_water_mm"])
+            for result in future_results
+        )
+
+        wait_trajectories.append(
+            trajectory
+        )
+
+    if not wait_scenarios:
+        return 0.0, np.empty((0, 0))
+
+    probability = successful / len(
+        wait_scenarios
+    )
+
+    return (
+        float(probability),
+        np.asarray(
+            wait_trajectories,
+            dtype=float,
+        ),
+    )
+
 
 def make_decision(
     crop_name,
@@ -319,30 +391,20 @@ def make_decision(
     """
     Generate a probabilistic pre-sowing decision.
 
-    The engine compares:
+    Compares:
 
         1. SOW TODAY
         2. WAIT 5 DAYS
         3. SWITCH TO SOYBEAN
 
     Returns:
-        dict containing:
-
-        - decision
-        - economic comparison
-        - establishment probabilities
-        - Monte Carlo trajectories
-        - uncertainty information
-        - assumptions
-
-    Important:
-        SOW / WAIT / SWITCH are decision-support outputs.
-        They are not guarantees of crop success.
+        dict containing recommendation, probabilities,
+        trajectories, economic comparison and assumptions.
     """
 
-    # ========================================================
-    # VALIDATE INPUTS
-    # ========================================================
+    # =========================================================
+    # VALIDATION
+    # =========================================================
 
     _validate_inputs(
         crop_name=crop_name,
@@ -354,21 +416,39 @@ def make_decision(
         days_to_simulate=days_to_simulate,
     )
 
-    # ========================================================
+    # =========================================================
     # INITIAL WEATHER STATE
-    # ========================================================
+    # =========================================================
 
     initial_state = _get_initial_state(
         rainfall_yesterday_mm
     )
 
-    # ========================================================
-    # SCENARIO A — SOW TODAY
-    # ========================================================
+    # =========================================================
+    # DETERMINE REQUIRED SIMULATION HORIZON
+    # =========================================================
+
+    crop_germination_days = int(
+        crops[crop_name]["germination_days"]
+    )
+
+    soybean_germination_days = int(
+        crops["soybean"]["germination_days"]
+    )
+
+    simulation_days = max(
+        days_to_simulate,
+        crop_germination_days,
+        soybean_germination_days,
+    )
+
+    # =========================================================
+    # SOW TODAY
+    # =========================================================
 
     sow_scenarios = generate_monte_carlo_scenarios(
         transition_matrix=transition_matrix,
-        num_days=days_to_simulate,
+        num_days=simulation_days,
         num_simulations=num_simulations,
         initial_state=initial_state,
         random_seed=random_seed,
@@ -383,128 +463,51 @@ def make_decision(
         )
     )
 
-    # ========================================================
-    # SCENARIO B — WAIT 5 DAYS
-    # ========================================================
+    # =========================================================
+    # WAIT 5 DAYS
+    # =========================================================
 
     wait_days = 5
 
+    # We need enough days for:
+    #
+    #     WAIT period
+    #          +
+    #     crop establishment period
+    #
+    wait_simulation_days = (
+        wait_days
+        + max(
+            days_to_simulate,
+            crop_germination_days,
+        )
+    )
+
     wait_scenarios = generate_monte_carlo_scenarios(
         transition_matrix=transition_matrix,
-        num_days=wait_days + days_to_simulate,
+        num_days=wait_simulation_days,
         num_simulations=num_simulations,
         initial_state=initial_state,
         random_seed=random_seed + 1,
     )
 
-    wait_successes = 0
-    wait_trajectories = []
-
-    crop_germination_days = crops[
-        crop_name
-    ]["germination_days"]
-
-    for scenario in wait_scenarios:
-
-        # ----------------------------------------------------
-        # Simulate the 5-day waiting period
-        # ----------------------------------------------------
-
-        wait_weather = scenario[
-            :wait_days
-        ]
-
-        wait_soil_results = (
-            simulate_rainfall_soil_water(
-                rainfall_scenario=wait_weather,
-                soil_type=soil_type,
-                initial_moisture_mm=current_moisture_mm,
-            )
-        )
-
-        if wait_soil_results:
-
-            wait_moisture = (
-                wait_soil_results[-1][
-                    "final_water_mm"
-                ]
-            )
-
-        else:
-
-            wait_moisture = (
-                current_moisture_mm
-            )
-
-        # ----------------------------------------------------
-        # Simulate crop establishment after waiting
-        # ----------------------------------------------------
-
-        future_scenario = scenario[
-            wait_days:
-        ]
-
-        if len(future_scenario) < crop_germination_days:
-            continue
-
-        soil_water_results = (
-            simulate_rainfall_soil_water(
-                rainfall_scenario=future_scenario,
-                soil_type=soil_type,
-                initial_moisture_mm=wait_moisture,
-            )
-        )
-
-        establishment = evaluate_establishment(
-            soil_water_results=soil_water_results,
-            crop=crop_name,
+    germ_prob_wait, wait_trajectories = (
+        _safe_wait_trajectories(
+            wait_scenarios=wait_scenarios,
+            wait_days=wait_days,
+            crop_name=crop_name,
             soil_type=soil_type,
+            current_moisture_mm=current_moisture_mm,
         )
+    )
 
-        if establishment[
-            "establishment_success"
-        ]:
-            wait_successes += 1
-
-        wait_trajectory = [
-            current_moisture_mm
-        ]
-
-        # Include the moisture evolution during
-        # the waiting period.
-        wait_trajectory.extend(
-            result["final_water_mm"]
-            for result in wait_soil_results
-        )
-
-        # Include the moisture evolution after sowing.
-        wait_trajectory.extend(
-            result["final_water_mm"]
-            for result in soil_water_results
-        )
-
-        wait_trajectories.append(
-            wait_trajectory
-        )
-
-    if wait_scenarios:
-
-        germ_prob_wait = (
-            wait_successes
-            / len(wait_scenarios)
-        )
-
-    else:
-
-        germ_prob_wait = 0.0
-
-    # ========================================================
-    # SCENARIO C — SWITCH TO SOYBEAN
-    # ========================================================
+    # =========================================================
+    # SWITCH TO SOYBEAN
+    # =========================================================
 
     soybean_scenarios = sow_scenarios
 
-    germ_prob_soybean, _ = (
+    germ_prob_soybean, soybean_trajectories = (
         _scenario_establishment_probability(
             scenarios=soybean_scenarios,
             crop_name="soybean",
@@ -513,105 +516,81 @@ def make_decision(
         )
     )
 
-    # ========================================================
+    # =========================================================
     # ECONOMIC COMPARISON
-    # ========================================================
-    #
-    # The physical model produces establishment probabilities.
-    #
-    # The economic engine converts those probabilities into
-    # expected monetary outcomes.
-    #
-    # Economic assumptions remain inside economic_engine.py.
-    #
+    # =========================================================
 
-    economic_comparison = (
-        compare_all_decisions(
-            crop_name=crop_name,
-            soil_type=soil_type,
-            germ_prob_today=germ_prob_today,
-            germ_prob_wait=germ_prob_wait,
-            germ_prob_soybean=germ_prob_soybean,
-            rainfall_yesterday_mm=rainfall_yesterday_mm,
-            current_moisture_mm=current_moisture_mm,
-        )
+    economic_comparison = compare_all_decisions(
+        crop_name=crop_name,
+        soil_type=soil_type,
+        germ_prob_today=germ_prob_today,
+        germ_prob_wait=germ_prob_wait,
+        germ_prob_soybean=germ_prob_soybean,
+        rainfall_yesterday_mm=rainfall_yesterday_mm,
+        current_moisture_mm=current_moisture_mm,
     )
 
-    economic_decision = (
-        economic_comparison[
-            "best_decision"
-        ]
+    economic_decision = economic_comparison.get(
+        "best_decision",
+        "Wait 5 Days",
     )
-
-    # ========================================================
-    # MAP ECONOMIC DECISION
-    # ========================================================
 
     if economic_decision == "Sow Today":
-
         decision = "SOW TODAY"
 
     elif economic_decision == "Wait 5 Days":
-
         decision = "WAIT 5 DAYS"
 
     elif economic_decision == "Switch to Soybean":
-
         decision = "SWITCH TO SOYBEAN"
 
     else:
-
         decision = "WAIT 5 DAYS"
 
-    # ========================================================
+    # =========================================================
     # CONFIDENCE
-    # ========================================================
+    # =========================================================
 
     confidence = _calculate_confidence(
-        germ_prob_today,
-        germ_prob_wait,
-        germ_prob_soybean,
+        germ_prob_today=germ_prob_today,
+        germ_prob_wait=germ_prob_wait,
+        germ_prob_soybean=germ_prob_soybean,
     )
 
-    # ========================================================
-    # DECISION STATUS ICON
-    # ========================================================
+    # =========================================================
+    # DISPLAY INDICATOR
+    # =========================================================
 
     if decision == "SOW TODAY":
-
         color = "🟢"
 
     elif decision == "WAIT 5 DAYS":
-
         color = "🟡"
 
     else:
-
         color = "🔴"
 
-    # ========================================================
-    # CROP / SOIL INFORMATION
-    # ========================================================
+    # =========================================================
+    # CROP / SOIL REQUIREMENTS
+    # =========================================================
 
     crop = crops[crop_name]
     soil = soils[soil_type]
 
     min_moisture_mm = (
         soil["field_capacity_mm"]
-        * crop["min_moisture_pct"]
+        * float(crop["min_moisture_pct"])
         / 100.0
     )
 
-    # ========================================================
-    # RETURN RESULT
-    # ========================================================
+    # =========================================================
+    # FINAL RESULT
+    # =========================================================
 
     return {
         "decision": decision,
 
-        "economic_comparison": (
-            economic_comparison
-        ),
+        "economic_comparison": economic_comparison,
 
         "color": color,
 
@@ -633,10 +612,9 @@ def make_decision(
 
         "trajectories": trajectories,
 
-        "wait_simulations": np.asarray(
-            wait_trajectories,
-            dtype=float,
-        ),
+        "wait_simulations": wait_trajectories,
+
+        "soybean_trajectories": soybean_trajectories,
 
         "current_moisture": float(
             current_moisture_mm
@@ -646,15 +624,13 @@ def make_decision(
             min_moisture_mm
         ),
 
-        "initial_rainfall_state": (
-            initial_state
-        ),
+        "initial_rainfall_state": initial_state,
 
-        "num_simulations": (
+        "num_simulations": int(
             num_simulations
         ),
 
-        "days_to_simulate": (
+        "days_to_simulate": int(
             days_to_simulate
         ),
 
@@ -664,21 +640,20 @@ def make_decision(
             "wait_days": wait_days,
 
             "economic_decision_policy": (
-                "Final recommendation is selected "
-                "using expected economic outcome "
-                "across SOW, WAIT and SWITCH."
+                "Final recommendation is selected using "
+                "the economic comparison across SOW, WAIT "
+                "and SWITCH."
             ),
 
             "confidence_definition": (
-                "Probability separation between "
-                "the best and second-best option; "
-                "not a statistical confidence interval."
+                "Probability separation between the "
+                "best and second-best option; not a "
+                "statistical confidence interval."
             ),
 
-            "simulation_probability_note": (
-                "Establishment probabilities are "
-                "Monte Carlo scenario estimates and "
-                "are not guarantees of crop success."
+            "simulation_note": (
+                "Monte Carlo probabilities represent "
+                "simulated scenarios and are not guarantees."
             ),
         },
     }
