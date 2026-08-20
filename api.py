@@ -9,7 +9,7 @@ from src.decision_engine import make_decision
 app = FastAPI(
     title="CropLogic-Saathi API",
     version="1.0.0",
-    description="API for the CropLogic-Saathi pre-sowing decision engine"
+    description="API for the CropLogic-Saathi pre-sowing decision engine",
 )
 
 
@@ -35,7 +35,7 @@ class DecisionRequest(BaseModel):
 def health_check():
     return {
         "status": "ok",
-        "service": "CropLogic-Saathi API"
+        "service": "CropLogic-Saathi API",
     }
 
 
@@ -46,7 +46,7 @@ def health_check():
 @app.get("/api/v1/crops")
 def get_crops():
     return {
-        "crops": list(crops.keys())
+        "crops": list(crops.keys()),
     }
 
 
@@ -57,7 +57,7 @@ def get_crops():
 @app.get("/api/v1/soils")
 def get_soils():
     return {
-        "soils": list(soils.keys())
+        "soils": list(soils.keys()),
     }
 
 
@@ -71,12 +71,12 @@ def get_crop(crop_name: str):
     if crop_name not in crops:
         raise HTTPException(
             status_code=404,
-            detail=f"Unknown crop: {crop_name}"
+            detail=f"Unknown crop: {crop_name}",
         )
 
     return {
         "crop_name": crop_name,
-        "data": crops[crop_name]
+        "data": crops[crop_name],
     }
 
 
@@ -90,12 +90,12 @@ def get_soil(soil_type: str):
     if soil_type not in soils:
         raise HTTPException(
             status_code=404,
-            detail=f"Unknown soil type: {soil_type}"
+            detail=f"Unknown soil type: {soil_type}",
         )
 
     return {
         "soil_type": soil_type,
-        "data": soils[soil_type]
+        "data": soils[soil_type],
     }
 
 
@@ -106,22 +106,26 @@ def get_soil(soil_type: str):
 @app.post("/api/v1/decision")
 def decision(request: DecisionRequest):
 
+    # -----------------------------------------------------
+    # Basic input validation
+    # -----------------------------------------------------
+
     if request.crop_name not in crops:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown crop: {request.crop_name}"
+            detail=f"Unknown crop: {request.crop_name}",
         )
 
     if request.soil_type not in soils:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown soil type: {request.soil_type}"
+            detail=f"Unknown soil type: {request.soil_type}",
         )
 
     if len(request.transition_matrix) != 3:
         raise HTTPException(
             status_code=400,
-            detail="Transition matrix must contain 3 rows."
+            detail="Transition matrix must contain 3 rows.",
         )
 
     for row in request.transition_matrix:
@@ -129,33 +133,52 @@ def decision(request: DecisionRequest):
         if len(row) != 3:
             raise HTTPException(
                 status_code=400,
-                detail="Each transition matrix row must contain 3 values."
+                detail="Each transition matrix row must contain 3 values.",
             )
 
         if any(value < 0 or value > 1 for value in row):
             raise HTTPException(
                 status_code=400,
-                detail="Transition probabilities must be between 0 and 1."
+                detail="Transition probabilities must be between 0 and 1.",
             )
 
         if abs(sum(row) - 1.0) > 0.01:
             raise HTTPException(
                 status_code=400,
-                detail="Each transition matrix row must sum approximately to 1."
+                detail="Each transition matrix row must sum approximately to 1.",
             )
 
-    result = make_decision(
-        crop_name=request.crop_name,
-        soil_type=request.soil_type,
-        current_moisture_mm=request.current_moisture_mm,
-        rainfall_yesterday_mm=request.rainfall_yesterday_mm,
-        transition_matrix=request.transition_matrix,
-        num_simulations=request.num_simulations,
-        days_to_simulate=request.days_to_simulate
-    )
+    # -----------------------------------------------------
+    # Run decision engine
+    # -----------------------------------------------------
+
+    try:
+        result = make_decision(
+            crop_name=request.crop_name,
+            soil_type=request.soil_type,
+            current_moisture_mm=request.current_moisture_mm,
+            rainfall_yesterday_mm=request.rainfall_yesterday_mm,
+            transition_matrix=request.transition_matrix,
+            num_simulations=request.num_simulations,
+            days_to_simulate=request.days_to_simulate,
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    # -----------------------------------------------------
+    # Extract simulation results
+    # -----------------------------------------------------
 
     trajectories = result["trajectories"]
     wait_simulations = result["wait_simulations"]
+
+    # -----------------------------------------------------
+    # API response
+    # -----------------------------------------------------
 
     return {
         "decision": result["decision"],
@@ -169,12 +192,12 @@ def decision(request: DecisionRequest):
         "soil_moisture_today": {
             "mean": trajectories.mean(axis=0).tolist(),
             "min": trajectories.min(axis=0).tolist(),
-            "max": trajectories.max(axis=0).tolist()
+            "max": trajectories.max(axis=0).tolist(),
         },
 
         "soil_moisture_wait": {
             "mean": wait_simulations.mean(axis=0).tolist(),
             "min": wait_simulations.min(axis=0).tolist(),
-            "max": wait_simulations.max(axis=0).tolist()
-        }
+            "max": wait_simulations.max(axis=0).tolist(),
+        },
     }

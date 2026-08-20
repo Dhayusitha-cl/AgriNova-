@@ -97,3 +97,19 @@ def test_negative_moisture():
     )
 
     assert response.status_code == 422
+def test_rounded_transition_matrix_returns_400():
+    payload = valid_payload()
+
+    payload["transition_matrix"] = [
+        [0.8758, 0.1086, 0.0156],
+        [0.2657, 0.6156, 0.1188],
+        [0.1048, 0.5810, 0.3143]
+    ]
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload
+    )
+
+    assert response.status_code == 400
+    assert "transition" in response.json()["detail"].lower()
