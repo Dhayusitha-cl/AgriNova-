@@ -154,6 +154,9 @@ def decision(request: DecisionRequest):
         days_to_simulate=request.days_to_simulate
     )
 
+    trajectories = result["trajectories"]
+    wait_simulations = result["wait_simulations"]
+
     return {
         "decision": result["decision"],
         "germ_prob_today": result["germ_prob_today"],
@@ -161,5 +164,17 @@ def decision(request: DecisionRequest):
         "germ_prob_soybean": result["germ_prob_soybean"],
         "confidence": result["confidence"],
         "current_moisture": result["current_moisture"],
-        "min_moisture_required": result["min_moisture_required"]
+        "min_moisture_required": result["min_moisture_required"],
+
+        "soil_moisture_today": {
+            "mean": trajectories.mean(axis=0).tolist(),
+            "min": trajectories.min(axis=0).tolist(),
+            "max": trajectories.max(axis=0).tolist()
+        },
+
+        "soil_moisture_wait": {
+            "mean": wait_simulations.mean(axis=0).tolist(),
+            "min": wait_simulations.min(axis=0).tolist(),
+            "max": wait_simulations.max(axis=0).tolist()
+        }
     }

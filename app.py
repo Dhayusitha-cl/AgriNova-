@@ -1,228 +1,497 @@
 import streamlit as st
-import numpy as np
-import matplotlib.pyplot as plt
 import requests
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import ee
+from src.earth_engine import get_soil_moisture
 
-from src.crop_data import crops
-from src.soil_data import soils
-from src.weather_simulator import create_transition_matrix
-from src.decision_engine import make_decision
-API_URL = "http://127.0.0.1:8000"
-def get_api_decision(crop_name, soil_type, current_moisture, rainfall_24h, transition_matrix):
-    payload = {
-        "crop_name": crop_name,
-        "soil_type": soil_type,
-        "current_moisture_mm": current_moisture,
-        "rainfall_yesterday_mm": rainfall_24h,
-        "transition_matrix": transition_matrix.tolist(),
-        "num_simulations": 500,
-        "days_to_simulate": 7
-    }
+DISTRICT_COORDINATES = {
+    "Coimbatore": (11.0168, 76.9558),
+    "Chennai": (13.0827, 80.2707),
+    "Madurai": (9.9252, 78.1198),
+    "Salem": (11.6643, 78.1460),
+    "Trichy": (10.7905, 78.7047),
+    "Erode": (11.3410, 77.7172),
+    "Tiruppur": (11.1085, 77.3411),
+}
+# ============================================================
+# PAGE CONFIGURATION
+# ============================================================
 
-    response = requests.post(
-        f"{API_URL}/api/v1/decision",
-        json=payload
-    )
-
-    response.raise_for_status()
-
-    return response.json()
-
-# Page config
 st.set_page_config(
-    page_title="AgriNova",
+    page_title="AgriNova - CropLogic Saathi",
     page_icon="🌾",
     layout="wide"
 )
 
-# Title
-st.title("🌾 AgriNova")
-st.subheader("Climate-Resilient Sowing Decision Support for Smallholder Farmers")
 
-# Sidebar - Farmer Inputs
-st.sidebar.header("📍 Farmer Information")
+# ============================================================
+# GOOGLE EARTH ENGINE INITIALIZATION
+# ============================================================
+
+EE_PROJECT = "project-3dc0f771-1142-477c-9b2"
+
+try:
+    ee.Initialize(project=EE_PROJECT)
+    EE_CONNECTED = True
+except Exception as e:
+    EE_CONNECTED = False
+    EE_ERROR = str(e)
+
+
+# ============================================================
+# API CONFIGURATION
+# ============================================================
+
+API_URL = "http://127.0.0.1:8000"
+
+
+# ============================================================
+# TITLE
+# ============================================================
+
+st.title("🌾 AgriNova")
+st.subheader("CropLogic-Saathi — Climate-Resilient Sowing Decision Support")
+
+st.write(
+    "An AI-assisted decision support system for rainfed farmers. "
+    "It combines soil, rainfall and climate-related information "
+    "to recommend whether to sow now, wait, or switch crops."
+)
+
+
+# ============================================================
+# GOOGLE EARTH ENGINE STATUS
+# ============================================================
+
+if EE_CONNECTED:
+    st.success("🛰️ Google Earth Engine connected successfully")
+else:
+    st.warning("⚠️ Google Earth Engine is not currently available.")
+
+
+# ============================================================
+# SIDEBAR
+# ============================================================
+
+st.sidebar.header("🌱 Farmer Inputs")
 
 district = st.sidebar.selectbox(
     "District",
-    ["Yavatmal (Maharashtra)", "Anantapur (Andhra Pradesh)", "Kalahandi (Odisha)"]
-)
-
-soil_type_display = st.sidebar.selectbox(
-    "Soil Type",
-    ["Sandy Loam", "Medium Black (Regur)", "Deep Black (Cotton Soil)"]
-)
-
-soil_map = {
-    "Sandy Loam": "sandy_loam",
-    "Medium Black (Regur)": "medium_black",
-    "Deep Black (Cotton Soil)": "deep_black"
-}
-soil_type = soil_map[soil_type_display]
-
-crop_display = st.sidebar.selectbox(
-    "Primary Crop",
-    ["Cotton (BT)", "Soybean (JS-335)", "Sorghum/Jowar (CSH-16)", "Paddy (MTU-1010)"]
-)
-
-crop_map = {
-    "Cotton (BT)": "cotton",
-    "Soybean (JS-335)": "soybean",
-    "Sorghum/Jowar (CSH-16)": "sorghum",
-    "Paddy (MTU-1010)": "paddy"
-}
-crop_name = crop_map[crop_display]
-
-st.sidebar.markdown("---")
-st.sidebar.header("🌧️ Today's Conditions")
-
-rainfall_24h = st.sidebar.slider(
-    "Rainfall in last 24 hours (mm)",
-    min_value=0,
-    max_value=50,
-    value=10,
-    step=1
-)
-
-st.sidebar.markdown("### 🖐️ Soil Ball Test")
-st.sidebar.write("Squeeze a handful of soil. What happens?")
-
-ball_test = st.sidebar.radio(
-    "Soil ball test result",
     [
-        "Does not form a ball (very dry)",
-        "Forms a ball but crumbles (moist)",
-        "Forms a ball, holds shape (wet)",
-        "Water squeezes out (saturated)"
+        "Coimbatore",
+        "Erode",
+        "Tiruppur",
+        "Salem",
+        "Namakkal"
+    ]
+)
+st.subheader("🌍 Google Earth Engine")
+
+latitude, longitude = DISTRICT_COORDINATES.get(
+    district,
+    DISTRICT_COORDINATES["Coimbatore"]
+)
+
+with st.spinner("Fetching environmental data from Google Earth Engine..."):
+    ee_moisture = get_soil_moisture(latitude, longitude)
+
+if ee_moisture is not None:
+    st.metric(
+        "Earth Engine Soil Moisture",
+        f"{ee_moisture:.3f}"
+    )
+
+    st.caption(
+        f"Satellite/environmental observation for {district}"
+    )
+else:
+    st.warning(
+        "Earth Engine data could not be retrieved."
+    )
+
+soil_type = st.sidebar.selectbox(
+    "Soil Type",
+    [
+        "sandy_loam",
+        "medium_black",
+        "deep_black"
     ]
 )
 
-ball_to_moisture = {
-    "Does not form a ball (very dry)": 15,
-    "Forms a ball but crumbles (moist)": 30,
-    "Forms a ball, holds shape (wet)": 50,
-    "Water squeezes out (saturated)": 70
-}
-current_moisture = ball_to_moisture[ball_test]
-
-# Main area
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    st.markdown("### 📊 Current Conditions Summary")
-    st.write(f"**District:** {district}")
-    st.write(f"**Soil Type:** {soil_type_display}")
-    st.write(f"**Crop:** {crop_display}")
-    st.write(f"**Current Soil Moisture:** ~{current_moisture} mm")
-    st.write(f"**Field Capacity:** {soils[soil_type]['field_capacity_mm']} mm")
-    moisture_pct = current_moisture / soils[soil_type]['field_capacity_mm'] * 100
-    st.write(f"**Moisture as % of Field Capacity:** {moisture_pct:.0f}%")
-
-with col2:
-    st.markdown("### 🎯 Get Recommendation")
-    if st.button("🔮 Get Sowing Recommendation", type="primary", use_container_width=True):
-        with st.spinner("Running 500 simulations..."):
-            transition_matrix = create_transition_matrix(week_number=3)
-            result = get_api_decision(
-    crop_name=crop_name,
-    soil_type=soil_type,
-    current_moisture=current_moisture,
-    rainfall_24h=rainfall_24h,
-    transition_matrix=transition_matrix
+crop = st.sidebar.selectbox(
+    "Current Crop",
+    [
+        "cotton",
+        "soybean",
+        "sorghum",
+        "paddy"
+    ]
 )
-            
-                       
-            st.session_state['decision_result'] = result
-            st.session_state['current_moisture'] = current_moisture
-            st.session_state['crop_display'] = crop_display
-            st.session_state['crop_name'] = crop_name
+rainfall = st.sidebar.number_input(
+    "Rainfall Yesterday (mm)",
+    min_value=0.0,
+    max_value=300.0,
+    value=20.0,
+    step=1.0
+)
 
-# Display decision if available
-if 'decision_result' in st.session_state:
-    result = st.session_state['decision_result']
-    current_moisture = st.session_state['current_moisture']
-    crop_display = st.session_state['crop_display']
-    crop_name = st.session_state['crop_name']
-    
-    st.markdown("---")
-    st.markdown(f"## 🌾 DECISION: {result['decision']}")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric(
-            "Germination Probability (Sow Today)",
-            f"{result['germ_prob_today']*100:.0f}%"
-        )
-    
-    with col2:
-        st.metric(
-            "Germination Probability (Wait 5 Days)",
-            f"{result['germ_prob_wait']*100:.0f}%"
-        )
-    
-    with col3:
-        st.metric(
-            "Germination Probability (Soybean)",
-            f"{result['germ_prob_soybean']*100:.0f}%"
-        )
-    
-       # Decision Analysis
-    st.markdown("### 📊 Decision Analysis")
+soil_moisture = st.sidebar.number_input(
+    "Current Soil Moisture (mm)",
+    min_value=0.0,
+    max_value=100.0,
+    value=30.0,
+    step=1.0
+)
 
-    analysis_col1, analysis_col2 = st.columns(2)
+soil_ball_test = st.sidebar.selectbox(
+    "Soil Ball Test",
+    [
+        "Moist",
+        "Slightly Dry",
+        "Dry"
+    ]
+)
 
-    with analysis_col1:
-        st.metric(
-            "Current Soil Moisture",
-            f"{result['current_moisture']:.1f} mm"
-        )
 
-    with analysis_col2:
-        st.metric(
-            "Minimum Moisture Required",
-            f"{result['min_moisture_required']:.1f} mm"
-        )
+# ============================================================
+# EARTH ENGINE DEMO DATA
+# ============================================================
 
-    st.info(
-        f"The API estimates a {result['confidence']*100:.1f}% "
-        f"confidence in this recommendation."
-    )
-    
-        # Decision comparison
-    st.markdown("### 📊 Decision Analysis")
+def get_earth_engine_demo_data():
 
-    chart_data = {
-        "Sow Today": result["germ_prob_today"] * 100,
-        "Wait 5 Days": result["germ_prob_wait"] * 100,
-        "Soybean": result["germ_prob_soybean"] * 100
+    if not EE_CONNECTED:
+        return None
+
+    try:
+        # Simple Earth Engine object.
+        # This confirms that the application can communicate
+        # with Google Earth Engine.
+
+        image = ee.Image("NASA/NASADEM_HGT/001")
+
+        elevation = image.select("elevation")
+
+        region = ee.Geometry.Point([76.9558, 11.0168])
+
+        value = elevation.reduceRegion(
+            reducer=ee.Reducer.mean(),
+            geometry=region,
+            scale=30
+        ).getInfo()
+
+        return value
+
+    except Exception:
+        return None
+
+
+# ============================================================
+# GET DECISION FROM FASTAPI
+# ============================================================
+
+def get_api_decision():
+
+    payload = {
+        "crop_name": crop,
+        "soil_type": soil_type,
+        "current_moisture_mm": soil_moisture,
+        "rainfall_yesterday_mm": rainfall,
+
+        # Default transition matrix used by the backend.
+        "transition_matrix": [
+            [0.6, 0.3, 0.1],
+            [0.2, 0.6, 0.2],
+            [0.1, 0.3, 0.6]
+        ],
+
+        "num_simulations": 1000,
+        "days_to_simulate": 5
     }
 
-    st.bar_chart(chart_data)
+    try:
 
-    st.info(
-        f"Recommendation confidence: "
-        f"{result['confidence'] * 100:.1f}%"
-    )
-    
-    # Reasoning
-    st.markdown("### 💡 Reasoning")
-    
-    reasoning_text = f"""
-    **Current Situation:**
-    - Soil moisture: {current_moisture} mm
-    - Minimum required for {crop_display} germination: {result['min_moisture_required']:.0f} mm
-    - Germination period: {crops[crop_name]['germination_days']} days
-    
-    **Analysis:**
-    - Probability of successful germination if sown today: **{result['germ_prob_today']*100:.0f}%**
-    - Probability if farmer waits 5 days: **{result['germ_prob_wait']*100:.0f}%**
-    - Probability with alternative crop (Soybean): **{result['germ_prob_soybean']*100:.0f}%**
-    
-    **Recommendation Confidence:** {result['confidence']*100:.0f}%
-    """
-    
-    st.markdown(reasoning_text)
+        response = requests.post(
+            f"{API_URL}/api/v1/decision",
+            json=payload,
+            timeout=10
+        )
 
-# Footer
-st.markdown("---")
-st.markdown("*AgriNova: Making climate-resilient decisions accessible to every farmer*")
+        if response.status_code == 200:
+            return response.json()
+
+        st.error(
+            f"API returned status code {response.status_code}"
+        )
+
+        st.code(response.text)
+
+        return None
+
+    except requests.exceptions.ConnectionError:
+
+        st.error(
+            "❌ Cannot connect to the FastAPI backend.\n\n"
+            "Make sure Person 3's API is running."
+        )
+
+        st.info(
+            "Run this in another terminal:\n"
+            "uvicorn api:app --reload"
+        )
+
+        return None
+
+    except Exception as e:
+
+        st.error(f"API Error: {e}")
+
+        return None
+
+
+# ============================================================
+# DECISION BUTTON
+# ============================================================
+
+st.divider()
+
+if st.button(
+    "🔍 Analyze Sowing Decision",
+    type="primary",
+    use_container_width=True
+):
+
+    with st.spinner("Analyzing climate and soil conditions..."):
+
+        result = get_api_decision()
+
+    if result is not None:
+
+        # ====================================================
+        # DECISION
+        # ====================================================
+
+        st.divider()
+
+        decision = result.get(
+            "decision",
+            "NO DECISION"
+        )
+
+        st.header("🌾 Decision")
+
+        if "SWITCH" in decision.upper():
+
+            st.warning(
+                f"🌱 {decision}"
+            )
+
+        elif "WAIT" in decision.upper():
+
+            st.info(
+                f"⏳ {decision}"
+            )
+
+        else:
+
+            st.success(
+                f"🌱 {decision}"
+            )
+
+
+        # ====================================================
+        # PROBABILITIES
+        # ====================================================
+
+        st.subheader("📊 Germination Probability")
+
+        col1, col2, col3 = st.columns(3)
+
+        germ_today = result.get(
+            "germ_prob_today",
+            0
+        )
+
+        germ_wait = result.get(
+            "germ_prob_wait",
+            0
+        )
+
+        germ_soybean = result.get(
+            "germ_prob_soybean",
+            0
+        )
+
+        col1.metric(
+            "Sow Today",
+            f"{germ_today * 100:.1f}%"
+        )
+
+        col2.metric(
+            "Wait 5 Days",
+            f"{germ_wait * 100:.1f}%"
+        )
+
+        col3.metric(
+            "Soybean",
+            f"{germ_soybean * 100:.1f}%"
+        )
+
+
+        # ====================================================
+        # DECISION ANALYSIS
+        # ====================================================
+
+        st.subheader("📋 Decision Analysis")
+
+        col1, col2, col3 = st.columns(3)
+
+        current_moisture = result.get(
+            "current_moisture",
+            soil_moisture
+        )
+
+        minimum_moisture = result.get(
+            "min_moisture_required",
+            0
+        )
+
+        confidence = result.get(
+            "confidence",
+            0
+        )
+
+        col1.metric(
+            "Current Soil Moisture",
+            f"{current_moisture:.1f} mm"
+        )
+
+        col2.metric(
+            "Minimum Required",
+            f"{minimum_moisture:.1f} mm"
+        )
+
+        col3.metric(
+            "Model Confidence",
+            f"{confidence * 100:.1f}%"
+        )
+
+
+        # ====================================================
+        # PROBABILITY BAR CHART
+        # ====================================================
+
+        st.subheader("📈 Probability Comparison")
+
+        probability_data = pd.DataFrame(
+            {
+                "Scenario": [
+                    "Sow Today",
+                    "Wait 5 Days",
+                    "Soybean"
+                ],
+
+                "Probability": [
+                    germ_today * 100,
+                    germ_wait * 100,
+                    germ_soybean * 100
+                ]
+            }
+        )
+
+        st.bar_chart(
+            probability_data.set_index("Scenario")
+        )
+
+
+        # ====================================================
+        # EARTH ENGINE
+        # ====================================================
+
+        st.divider()
+
+        st.subheader("🛰️ Google Earth Engine")
+
+        if EE_CONNECTED:
+
+            with st.spinner(
+                "Reading Earth Engine environmental data..."
+            ):
+
+                ee_data = get_earth_engine_demo_data()
+
+            if ee_data:
+
+                st.success(
+                    "Earth Engine successfully returned environmental data."
+                )
+
+                st.write(
+                    "This demonstrates the Google Earth Engine "
+                    "integration used as an environmental data layer."
+                )
+
+                st.json(ee_data)
+
+            else:
+
+                st.info(
+                    "Earth Engine is connected, but environmental "
+                    "data could not be retrieved for this demo."
+                )
+
+        else:
+
+            st.warning(
+                "Earth Engine connection is unavailable."
+            )
+
+
+        # ====================================================
+        # AI / CLIMATE EXPLANATION
+        # ====================================================
+
+        st.divider()
+
+        st.subheader("🤖 AI-Assisted Recommendation")
+
+        st.write(
+            f"""
+            Based on the current conditions:
+
+            - **District:** {district}
+            - **Soil:** {soil_type}
+            - **Current crop:** {crop}
+            - **Rainfall yesterday:** {rainfall:.1f} mm
+            - **Soil moisture:** {soil_moisture:.1f} mm
+            - **Soil condition:** {soil_ball_test}
+
+            The probabilistic decision engine evaluates possible
+            future moisture conditions and estimates germination
+            probabilities.
+
+            The system then recommends the action with the most
+            favorable climate-resilience outcome.
+            """
+        )
+
+
+        # ====================================================
+        # RAW API RESPONSE
+        # ====================================================
+
+        with st.expander("🔧 Technical API Response"):
+
+            st.json(result)
+
+
+# ============================================================
+# FOOTER
+# ============================================================
+
+st.divider()
+
+st.caption(
+    "AgriNova | CropLogic-Saathi | AI for Climate Resilience"
+)

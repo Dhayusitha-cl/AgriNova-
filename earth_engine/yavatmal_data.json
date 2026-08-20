@@ -1,0 +1,8 @@
+{
+    "district": "Yavatmal",
+    "state": "Maharashtra",
+    "satellite": "Sentinel-2",
+    "image_date": "2026-06-19",
+    "ndvi": 0.18403514533177892,
+    "source": "Google Earth Engine"
+}
