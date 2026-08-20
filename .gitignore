@@ -5,3 +5,4 @@ venv/
 .venv/
 docs/
 python
+data/raw/
