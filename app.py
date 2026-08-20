@@ -111,7 +111,7 @@ with col2:
                 rainfall_yesterday_mm=rainfall_24h,
                 transition_matrix=transition_matrix,
                 num_simulations=500,
-                days_to_simulate=7
+                days_to_simulate=max(14, crops[crop_name]["germination_days"])
             )
             
             st.session_state['decision_result'] = result
@@ -148,9 +148,43 @@ if 'decision_result' in st.session_state:
             "Germination Probability (Soybean)",
             f"{result['germ_prob_soybean']*100:.0f}%"
         )
-    
+
+    # Economic comparison
+    st.markdown("### 💰 Economic Comparison")
+
+    economic = result["economic_comparison"]
+
+    eco_col1, eco_col2, eco_col3 = st.columns(3)
+
+    with eco_col1:
+        st.metric(
+            "Sow Today",
+            f"₹{economic['sow_today']['expected_profit']:,.0f}"
+        )
+
+    with eco_col2:
+        st.metric(
+            "Wait 5 Days",
+            f"₹{economic['wait']['expected_profit']:,.0f}"
+        )
+
+    with eco_col3:
+        st.metric(
+            "Switch to Soybean",
+            f"₹{economic['switch']['expected_profit']:,.0f}"
+        )
+
+    st.info(
+        f"💡 Economic recommendation: "
+        f"**{economic['best_decision']}** "
+        f"with expected profit of "
+        f"**₹{economic['best_profit']:,.0f}**."
+    )
     # Visualization
-    st.markdown("### 📈 Soil Moisture Trajectories (500 Simulations)")
+    st.markdown(
+    f"### 📈 Soil Moisture Trajectories "
+    f"({result['num_simulations']} Simulations)"
+)
     st.write("Each line represents one possible future. Green zone = adequate moisture for germination.")
     
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -175,7 +209,9 @@ if 'decision_result' in st.session_state:
     st.pyplot(fig)
     
     # Probability distribution
-    st.markdown("### 🎲 Final Moisture Distribution (Day 7)")
+    st.markdown(
+    f"### 🎲 Final Moisture Distribution (Day {result['days_to_simulate']})"
+)
     
     fig2, ax2 = plt.subplots(figsize=(10, 4))
     final_moistures = result['trajectories'][:, -1]
@@ -188,7 +224,12 @@ if 'decision_result' in st.session_state:
     
     ax2.set_xlabel('Soil Moisture (mm)')
     ax2.set_ylabel('Number of Simulations')
-    ax2.set_title(f'Distribution of Soil Moisture after 7 Days\n{above_threshold*100:.0f}% of simulations above germination threshold')
+    ax2.set_title(
+    f"Distribution of Soil Moisture after "
+    f"{result['days_to_simulate']} Days\n"
+    f"{above_threshold*100:.0f}% of simulations above "
+    f"germination threshold"
+)
     ax2.legend()
     ax2.grid(True, alpha=0.3)
     

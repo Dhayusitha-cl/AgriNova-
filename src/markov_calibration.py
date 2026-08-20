@@ -360,3 +360,179 @@ def multi_year_transition_matrix_dataframe(
         index=STATES,
         columns=STATES,
     )
+
+
+
+def calculate_monthly_transition_matrices_from_training(df):
+    """
+    Calculate leakage-safe month-specific transition matrices.
+
+    Only observations supplied in df are used.
+
+    A transition is counted only when observations are
+    consecutive calendar days.
+
+    This function is intended for historical backtesting,
+    where df must contain only observations available before
+    the historical decision date.
+
+    State order:
+        dry
+        drizzle
+        rain
+    """
+
+    required_columns = {
+        "date",
+        "rainfall_state",
+    }
+
+    missing = required_columns - set(df.columns)
+
+    if missing:
+        raise ValueError(
+            f"Missing required columns: {sorted(missing)}"
+        )
+
+    data = df.copy()
+
+    data["date"] = pd.to_datetime(data["date"])
+
+    data = data.sort_values("date").reset_index(drop=True)
+
+    states = ["dry", "drizzle", "rain"]
+
+    monthly_counts = {
+        month: pd.DataFrame(
+            0,
+            index=states,
+            columns=states,
+            dtype=int,
+        )
+        for month in range(1, 13)
+    }
+
+    for current_row, next_row in zip(
+        data.iloc[:-1].itertuples(index=False),
+        data.iloc[1:].itertuples(index=False),
+    ):
+
+        current_date = pd.Timestamp(current_row.date)
+        next_date = pd.Timestamp(next_row.date)
+
+        # Prevent transitions across missing dates,
+        # year boundaries, or unrelated observations.
+        if next_date != current_date + pd.Timedelta(days=1):
+            continue
+
+        current_state = current_row.rainfall_state
+        next_state = next_row.rainfall_state
+
+        if (
+            current_state not in states
+            or next_state not in states
+        ):
+            continue
+
+        month = current_date.month
+
+        monthly_counts[
+            month
+        ].loc[
+            current_state,
+            next_state,
+        ] += 1
+
+    monthly_matrices = {}
+
+    for month in range(1, 13):
+
+        counts = monthly_counts[month]
+
+        row_totals = counts.sum(axis=1)
+
+        matrix = counts.div(
+            row_totals.replace(0, np.nan),
+            axis=0,
+        ).fillna(0.0)
+
+        monthly_matrices[month] = matrix.to_numpy()
+
+    return monthly_matrices
+def calculate_monthly_transition_matrices(df):
+    """
+    Calculate rainfall-state transition matrices separately
+    for each calendar month.
+
+    State order:
+        dry
+        drizzle
+        rain
+
+    Returns
+    -------
+    dict
+        Mapping month number -> 3x3 transition matrix.
+    """
+
+    required_columns = {
+        "date",
+        "rainfall_state",
+    }
+
+    missing = required_columns - set(df.columns)
+
+    if missing:
+        raise ValueError(
+            f"Missing required columns: {sorted(missing)}"
+        )
+
+    data = df.copy()
+
+    data["date"] = pd.to_datetime(data["date"])
+
+    states = [
+        "dry",
+        "drizzle",
+        "rain",
+    ]
+
+    monthly_matrices = {}
+
+    for month in range(1, 13):
+
+        month_data = data[
+            data["date"].dt.month == month
+        ].copy()
+
+        counts = pd.DataFrame(
+            0,
+            index=states,
+            columns=states,
+            dtype=int,
+        )
+
+        for current_state, next_state in zip(
+            month_data["rainfall_state"].iloc[:-1],
+            month_data["rainfall_state"].iloc[1:],
+        ):
+
+            if (
+                current_state in states
+                and next_state in states
+            ):
+                counts.loc[
+                    current_state,
+                    next_state,
+                ] += 1
+
+        row_totals = counts.sum(axis=1)
+
+        matrix = counts.div(
+            row_totals.replace(0, np.nan),
+            axis=0,
+        ).fillna(0.0)
+
+        monthly_matrices[month] = matrix.to_numpy()
+
+    return monthly_matrices
