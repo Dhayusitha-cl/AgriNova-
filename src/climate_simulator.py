@@ -1,191 +1,417 @@
 import numpy as np
 
-def simulate_climate_change(transition_matrix, temperature_increase=2.0, 
-                             rainfall_change_pct=-10):
+from .crop_data import crops
+from .soil_data import soils
+from .soil_water import simulate_soil_water
+from .crop_establishment import evaluate_establishment
+
+
+def simulate_climate_change(
+    transition_matrix,
+    temperature_increase=2.0,
+    rainfall_change_pct=-10,
+):
     """
-    Simulate how climate change affects weather patterns
-    - Higher temperatures increase ET (soil dries faster)
-    - Lower rainfall reduces moisture recharge
-    - Both combined increase sowing failure risk
-    
-    Parameters:
-    - transition_matrix: Original Markov Chain weather probabilities
-    - temperature_increase: Degrees Celsius increase (default 2.0)
-    - rainfall_change_pct: % change in rainfall (default -10%)
-    
-    Returns:
-    - adjusted_matrix: Modified transition probabilities
+    Adjust a Markov weather transition matrix for a climate scenario.
+
+    This is a scenario transformation, not a climate projection model.
     """
-    
-    # Copy original matrix
-    adjusted_matrix = transition_matrix.copy()
-    
-    # Reduce transition TO rain states (columns 1 and 2)
-    # Column 0 = dry, Column 1 = drizzle, Column 2 = rain
-    adjusted_matrix[:, 2] *= (1 + rainfall_change_pct / 100)
-    adjusted_matrix[:, 1] *= (1 + rainfall_change_pct / 200)
-    
-    # Re-normalize rows so probabilities sum to 1
-    row_sums = adjusted_matrix.sum(axis=1, keepdims=True)
-    row_sums[row_sums == 0] = 1  # Avoid division by zero
-    adjusted_matrix = adjusted_matrix / row_sums
-    
+
+    adjusted_matrix = np.asarray(
+        transition_matrix,
+        dtype=float,
+    ).copy()
+
+    if adjusted_matrix.shape != (3, 3):
+        raise ValueError(
+            "transition_matrix must have shape (3, 3)."
+        )
+
+    # Reduce transitions into rainfall states.
+    # State 0 = dry, state 1 = drizzle, state 2 = rain.
+    adjusted_matrix[:, 2] *= (
+        1 + rainfall_change_pct / 100
+    )
+
+    adjusted_matrix[:, 1] *= (
+        1 + rainfall_change_pct / 200
+    )
+
+    # Prevent negative probabilities.
+    adjusted_matrix = np.maximum(
+        adjusted_matrix,
+        0.0,
+    )
+
+    # Re-normalize each row.
+    row_sums = adjusted_matrix.sum(
+        axis=1,
+        keepdims=True,
+    )
+
+    if np.any(row_sums <= 0):
+        raise ValueError(
+            "Climate adjustment produced an invalid transition matrix."
+        )
+
+    adjusted_matrix /= row_sums
+
     return adjusted_matrix
 
 
-def calculate_et_with_warming(tmax, tmin, temperature_increase=2.0):
+def calculate_et_with_warming(
+    tmax,
+    tmin,
+    temperature_increase=2.0,
+):
     """
-    Calculate evapotranspiration with higher temperatures
-    Uses simplified Hargreaves equation
-    
-    Parameters:
-    - tmax: Maximum temperature (°C)
-    - tmin: Minimum temperature (°C)
-    - temperature_increase: Climate warming (°C)
-    
-    Returns:
-    - ET value in mm/day
+    Calculate simplified daily evapotranspiration under warming.
+
+    This is a simplified scenario calculation and should not be
+    interpreted as a calibrated ET model.
     """
-    
-    # Apply temperature increase
+
     tmax_adj = tmax + temperature_increase
     tmin_adj = tmin + temperature_increase
-    tavg = (tmax_adj + tmin_adj) / 2
-    
-    # Simplified ET formula
+
+    tavg = (
+        tmax_adj + tmin_adj
+    ) / 2
+
     et = 0.5 * (tavg - 10)
-    
-    # Clamp between 1 and 12 mm/day
-    return max(1, min(et, 12))
+
+    return max(
+        1,
+        min(et, 12),
+    )
 
 
-def run_climate_projection(crop_name, soil_type, current_moisture, 
-                            rainfall_yesterday, transition_matrix,
-                            climate_scenarios=None):
+def _sample_rainfall_series(
+    transition_matrix,
+    rainfall_yesterday,
+    days,
+    rng,
+):
     """
-    Run germination probability for different climate scenarios
-    
-    Parameters:
-    - crop_name: 'cotton', 'soybean', 'sorghum', 'paddy'
-    - soil_type: 'sandy_loam', 'medium_black', 'deep_black'
-    - current_moisture: Current soil moisture (mm)
-    - rainfall_yesterday: Yesterday's rainfall (mm)
-    - transition_matrix: Original Markov Chain matrix
-    - climate_scenarios: List of scenarios to test
-    
-    Returns:
-    - results: Dictionary with germination probabilities for each scenario
+    Generate one plausible rainfall sequence from the Markov model.
+
+    Weather states:
+        0 = dry
+        1 = drizzle
+        2 = rain
+
+    The rainfall amount associated with each state is based on the
+    supplied recent rainfall observation.
     """
-    
-    # Import dependencies
-    import sys
-    sys.path.append('src')
-    from crop_data import crops
-    from soil_data import soils
-    from decision_engine import simulate_soil_moisture, calculate_germination_probability
-    
+
+    matrix = np.asarray(
+        transition_matrix,
+        dtype=float,
+    )
+
+    rainfall_yesterday = max(
+        0.0,
+        float(rainfall_yesterday),
+    )
+
+    # Simple scenario rainfall mapping.
+    # This keeps the climate simulator compatible with the existing
+    # 3-state Markov representation without inventing a new model.
+    state_rainfall = np.array(
+        [
+            0.0,
+            rainfall_yesterday * 0.5,
+            rainfall_yesterday * 1.5,
+        ],
+        dtype=float,
+    )
+
+    # If yesterday was dry, provide small scenario amounts for the
+    # wet states rather than making every simulated trajectory zero.
+    if rainfall_yesterday == 0:
+        state_rainfall = np.array(
+            [0.0, 5.0, 15.0],
+            dtype=float,
+        )
+
+    current_state = 0
+
+    rainfall_series = []
+
+    for _ in range(days):
+        probabilities = matrix[current_state]
+
+        next_state = rng.choice(
+            3,
+            p=probabilities,
+        )
+
+        rainfall_series.append(
+            state_rainfall[next_state]
+        )
+
+        current_state = next_state
+
+    return rainfall_series
+
+
+def _run_single_scenario(
+    crop_name,
+    soil_type,
+    current_moisture,
+    rainfall_yesterday,
+    transition_matrix,
+    temperature_increase,
+    num_simulations,
+    days,
+    rng,
+):
+    """
+    Run Monte Carlo establishment simulation for one climate scenario.
+    """
+
+    if crop_name not in crops:
+        raise ValueError(
+            f"Unknown crop: {crop_name}"
+        )
+
+    if soil_type not in soils:
+        raise ValueError(
+            f"Unknown soil type: {soil_type}"
+        )
+
+    field_capacity = float(
+        soils[soil_type]["field_capacity_mm"]
+    )
+
+    if current_moisture < 0:
+        raise ValueError(
+            "current_moisture cannot be negative."
+        )
+
+    if current_moisture > field_capacity:
+        raise ValueError(
+            "current_moisture cannot exceed field capacity."
+        )
+
+    crop = crops[crop_name]
+
+    germination_days = int(
+        crop["germination_days"]
+    )
+
+    simulation_days = max(
+        days,
+        germination_days,
+    )
+
+    successful_runs = 0
+
+    for _ in range(num_simulations):
+
+        rainfall_series = _sample_rainfall_series(
+            transition_matrix=transition_matrix,
+            rainfall_yesterday=rainfall_yesterday,
+            days=simulation_days,
+            rng=rng,
+        )
+
+        # ET increases under warming.
+        #
+        # We use a simple baseline ET scenario because the current API
+        # does not provide daily Tmax/Tmin observations.
+        baseline_et = 6.0 + (
+            0.5 * temperature_increase
+        )
+
+        baseline_et = max(
+            1.0,
+            min(baseline_et, 12.0),
+        )
+
+        et_series = [
+            baseline_et
+        ] * simulation_days
+
+        soil_water_results = simulate_soil_water(
+            rainfall_series=rainfall_series,
+            et_series=et_series,
+            soil_type=soil_type,
+            initial_water_mm=current_moisture,
+        )
+
+        establishment = evaluate_establishment(
+            soil_water_results=soil_water_results,
+            crop=crop_name,
+            soil_type=soil_type,
+        )
+
+        if establishment["establishment_success"]:
+            successful_runs += 1
+
+    probability = (
+        successful_runs / num_simulations
+    )
+
+    return probability
+
+
+def run_climate_projection(
+    crop_name,
+    soil_type,
+    current_moisture,
+    rainfall_yesterday,
+    transition_matrix,
+    climate_scenarios=None,
+    num_simulations=300,
+    days=7,
+    random_seed=42,
+):
+    """
+    Estimate crop-establishment probability under climate scenarios.
+
+    Scenarios:
+        Current
+        2030
+        2050
+
+    Results are Monte Carlo scenario estimates, not guarantees or
+    validated future climate predictions.
+    """
+
     if climate_scenarios is None:
-        climate_scenarios = ['Current', '2030', '2050']
-    
+        climate_scenarios = [
+            "Current",
+            "2030",
+            "2050",
+        ]
+
+    rng = np.random.default_rng(
+        random_seed
+    )
+
     results = {}
-    
+
     for scenario in climate_scenarios:
-        if scenario == 'Current':
-            # No changes
-            adjusted_matrix = transition_matrix
-            temp_increase = 0
-            
-        elif scenario == '2030':
-            # Moderate climate change
-            adjusted_matrix = simulate_climate_change(
-                transition_matrix, 
-                temperature_increase=1.0, 
-                rainfall_change_pct=-5
+
+        if scenario == "Current":
+
+            adjusted_matrix = np.asarray(
+                transition_matrix,
+                dtype=float,
             )
+
+            temp_increase = 0.0
+
+        elif scenario == "2030":
+
             temp_increase = 1.0
-            
-        elif scenario == '2050':
-            # Severe climate change
-            adjusted_matrix = simulate_climate_change(
-                transition_matrix, 
-                temperature_increase=2.5, 
-                rainfall_change_pct=-15
+
+            adjusted_matrix = (
+                simulate_climate_change(
+                    transition_matrix,
+                    temperature_increase=1.0,
+                    rainfall_change_pct=-5,
+                )
             )
+
+        elif scenario == "2050":
+
             temp_increase = 2.5
-            
+
+            adjusted_matrix = (
+                simulate_climate_change(
+                    transition_matrix,
+                    temperature_increase=2.5,
+                    rainfall_change_pct=-15,
+                )
+            )
+
         else:
             continue
-        
-        # Run simulation with adjusted weather
-        trajectories = simulate_soil_moisture(
-            initial_moisture=current_moisture,
-            rainfall_today=rainfall_yesterday,
-            transition_matrix=adjusted_matrix,
+
+        probability = _run_single_scenario(
+            crop_name=crop_name,
             soil_type=soil_type,
-            num_simulations=300,
-            days=7
+            current_moisture=current_moisture,
+            rainfall_yesterday=rainfall_yesterday,
+            transition_matrix=adjusted_matrix,
+            temperature_increase=temp_increase,
+            num_simulations=num_simulations,
+            days=days,
+            rng=rng,
         )
-        
-        # Calculate germination probability
-        soil = soils[soil_type]
+
         crop = crops[crop_name]
-        min_moisture = soil['field_capacity_mm'] * (crop['min_moisture_pct'] / 100)
-        
-        germ_prob = calculate_germination_probability(
-            trajectories, min_moisture, crop['germination_days']
+        soil = soils[soil_type]
+
+        minimum_moisture = (
+            float(
+                soil["field_capacity_mm"]
+            )
+            * float(
+                crop["min_moisture_pct"]
+            )
+            / 100
         )
-        
+
         results[scenario] = {
-            'germination_probability': germ_prob,
-            'trajectories': trajectories,
-            'temperature_increase': temp_increase,
-            'min_moisture': min_moisture
+            "germination_probability": probability,
+            "temperature_increase": temp_increase,
+            "min_moisture": minimum_moisture,
+            "transition_matrix": adjusted_matrix,
         }
-    
+
     return results
 
 
 def get_climate_impact_summary(results):
     """
-    Generate a text summary of climate impact
-    
-    Parameters:
-    - results: Dictionary from run_climate_projection
-    
-    Returns:
-    - summary: String with key findings
+    Generate a concise explanation of climate-scenario results.
     """
-    
-    if 'Current' not in results:
+
+    if "Current" not in results:
         return "No current baseline data available."
-    
-    current_prob = results['Current']['germination_probability']
-    
-    summary = f"**Current germination probability:** {current_prob*100:.0f}%\n\n"
-    
-    if '2030' in results:
-        prob_2030 = results['2030']['germination_probability']
-        change = (prob_2030 - current_prob) * 100
-        summary += f"**2030 projection:** {prob_2030*100:.0f}% "
-        
-        if change < -5:
-            summary += f"(⚠️ {change:.0f}% decrease)\n\n"
-        else:
-            summary += f"({change:.0f}% change)\n\n"
-    
-    if '2050' in results:
-        prob_2050 = results['2050']['germination_probability']
-        change = (prob_2050 - current_prob) * 100
-        summary += f"**2050 projection:** {prob_2050*100:.0f}% "
-        
-        if change < -10:
-            summary += f"(🚨 {change:.0f}% significant decrease)\n\n"
-        else:
-            summary += f"({change:.0f}% change)\n\n"
-    
-    # Add recommendation
-    if current_prob > 0.6 and '2050' in results:
-        if results['2050']['germination_probability'] < 0.5:
-            summary += "**Recommendation:** Consider switching to drought-tolerant crops (sorghum, millets) for long-term climate resilience."
-    
+
+    current_prob = results[
+        "Current"
+    ]["germination_probability"]
+
+    summary = (
+        f"Current establishment probability: "
+        f"{current_prob * 100:.0f}%\n\n"
+    )
+
+    if "2030" in results:
+
+        prob_2030 = results[
+            "2030"
+        ]["germination_probability"]
+
+        change = (
+            prob_2030 - current_prob
+        ) * 100
+
+        summary += (
+            f"2030 scenario: "
+            f"{prob_2030 * 100:.0f}% "
+            f"({change:+.0f} percentage points)\n\n"
+        )
+
+    if "2050" in results:
+
+        prob_2050 = results[
+            "2050"
+        ]["germination_probability"]
+
+        change = (
+            prob_2050 - current_prob
+        ) * 100
+
+        summary += (
+            f"2050 scenario: "
+            f"{prob_2050 * 100:.0f}% "
+            f"({change:+.0f} percentage points)"
+        )
+
     return summary
