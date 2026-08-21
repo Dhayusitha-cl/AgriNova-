@@ -112,3 +112,56 @@ def test_summarize_monte_carlo_scenarios():
     assert summary["min_total_mm"] == 20.0
     assert summary["max_total_mm"] == 30.0
     assert summary["mean_total_mm"] == 25.0
+def test_calibrated_rainfall_scenario_structure():
+    from src.weather_simulator import (
+        generate_calibrated_rainfall_scenario,
+    )
+
+    scenario = generate_calibrated_rainfall_scenario(
+        start_date="2024-07-01",
+        num_days=14,
+        initial_state="drizzle",
+        random_seed=42,
+    )
+
+    assert len(scenario) == 14
+
+    dates = [
+        pd.Timestamp(day["date"])
+        for day in scenario
+    ]
+
+    assert dates[0] == pd.Timestamp("2024-07-01")
+
+    assert dates[-1] == pd.Timestamp("2024-07-14")
+
+    for day in scenario:
+        assert day["rainfall_state"] in [
+            "dry",
+            "drizzle",
+            "rain",
+        ]
+
+        assert day["rainfall_mm"] >= 0
+
+
+def test_calibrated_rainfall_scenario_is_reproducible():
+    from src.weather_simulator import (
+        generate_calibrated_rainfall_scenario,
+    )
+
+    scenario_1 = generate_calibrated_rainfall_scenario(
+        start_date="2024-07-01",
+        num_days=14,
+        initial_state="drizzle",
+        random_seed=42,
+    )
+
+    scenario_2 = generate_calibrated_rainfall_scenario(
+        start_date="2024-07-01",
+        num_days=14,
+        initial_state="drizzle",
+        random_seed=42,
+    )
+
+    assert scenario_1 == scenario_2

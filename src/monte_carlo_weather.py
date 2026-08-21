@@ -12,6 +12,170 @@ import numpy as np
 
 from src.weather_simulator import generate_rainfall_scenario
 
+def generate_calibrated_monte_carlo_scenarios(
+    start_date,
+    num_days,
+    num_simulations=1000,
+    initial_state="dry",
+    random_seed=None,
+):
+    """
+    Generate multiple rainfall scenarios using calibrated
+    seasonal historical rainfall behaviour.
+
+    Historical calibration is performed once and reused
+    across all Monte Carlo simulations.
+
+    The generated outputs are plausible scenarios, not
+    deterministic weather forecasts or guarantees.
+    """
+
+    import pandas as pd
+
+    from src.markov_calibration import (
+        calculate_transition_matrix,
+        get_monthly_transition_matrix_with_fallback,
+    )
+    from src.rainfall_amount_calibration import (
+        load_processed_rainfall,
+        sample_month_state_rainfall_amounts,
+    )
+
+    if num_days <= 0:
+        raise ValueError(
+            "num_days must be greater than zero."
+        )
+
+    if num_simulations <= 0:
+        raise ValueError(
+            "num_simulations must be greater than zero."
+        )
+
+    if initial_state not in ["dry", "drizzle", "rain"]:
+        raise ValueError(
+            f"Unknown initial state: {initial_state}"
+        )
+
+    simulation_start = pd.Timestamp(start_date)
+
+    # ---------------------------------------------------------
+    # CALIBRATION: perform expensive historical processing ONCE
+    # ---------------------------------------------------------
+
+    rainfall_data = load_processed_rainfall()
+
+    fallback_matrix = calculate_transition_matrix(
+        rainfall_data
+    )
+
+    monthly_matrices = {}
+
+    for month in range(1, 13):
+        monthly_matrices[month] = (
+            get_monthly_transition_matrix_with_fallback(
+                rainfall_data,
+                month=month,
+                fallback_matrix=fallback_matrix,
+            )
+        )
+
+    # Pre-group observed rainfall amounts by month and state.
+    rainfall_samples = {}
+
+    for month in range(1, 13):
+        month_data = rainfall_data[
+            rainfall_data["date"].dt.month == month
+        ]
+
+        for state in ["dry", "drizzle", "rain"]:
+
+            values = month_data.loc[
+                month_data["rainfall_state"] == state,
+                "rainfall_mm",
+            ].to_numpy(dtype=float)
+
+            if len(values) == 0:
+                values = rainfall_data.loc[
+                    rainfall_data["rainfall_state"] == state,
+                    "rainfall_mm",
+                ].to_numpy(dtype=float)
+
+            if len(values) == 0:
+                raise ValueError(
+                    f"No rainfall observations found for "
+                    f"state '{state}'."
+                )
+
+            rainfall_samples[(month, state)] = values
+
+    # ---------------------------------------------------------
+    # MONTE CARLO
+    # ---------------------------------------------------------
+
+    rng = np.random.default_rng(random_seed)
+
+    scenarios = []
+
+    states = ["dry", "drizzle", "rain"]
+
+    for _ in range(num_simulations):
+
+        current_state = initial_state
+        simulation_date = simulation_start
+
+        scenario = []
+
+        for day in range(num_days):
+
+            month = simulation_date.month
+
+            matrix = monthly_matrices[month]
+
+            current_index = states.index(
+                current_state
+            )
+
+            if day == 0:
+                simulated_state = current_state
+            else:
+                next_index = rng.choice(
+                    len(states),
+                    p=matrix[current_index],
+                )
+
+                simulated_state = states[next_index]
+
+            if simulated_state == "dry":
+
+                rainfall = 0.0
+
+            else:
+
+                values = rainfall_samples[
+                    (month, simulated_state)
+                ]
+
+                rainfall = float(
+                    rng.choice(values)
+                )
+
+            scenario.append(
+                {
+                    "day": day + 1,
+                    "date": simulation_date.strftime(
+                        "%Y-%m-%d"
+                    ),
+                    "rainfall_state": simulated_state,
+                    "rainfall_mm": rainfall,
+                }
+            )
+
+            current_state = simulated_state
+            simulation_date += pd.Timedelta(days=1)
+
+        scenarios.append(scenario)
+
+    return scenarios
 
 def generate_monte_carlo_scenarios(
     transition_matrix,

@@ -160,3 +160,80 @@ def test_multi_year_transition_matrix_is_valid():
     matrix = calculate_multi_year_transition_matrix()
 
     assert validate_transition_matrix(matrix) is True
+def test_monthly_transition_matrix_uses_month_specific_data():
+    from src.markov_calibration import (
+        calculate_monthly_transition_matrices_from_training,
+        combine_historical_rainfall_data,
+        get_monthly_transition_matrix_with_fallback,
+    )
+
+    dataframe = combine_historical_rainfall_data()
+
+    monthly_matrices = calculate_monthly_transition_matrices_from_training(
+        dataframe
+    )
+
+    result = get_monthly_transition_matrix_with_fallback(
+        dataframe,
+        month=7,
+    )
+
+    assert np.allclose(
+        result,
+        monthly_matrices[7],
+    )
+
+    assert np.allclose(
+        result.sum(axis=1),
+        1.0,
+    )
+
+
+def test_monthly_transition_matrix_falls_back_for_unobserved_state():
+    from src.markov_calibration import (
+        calculate_transition_matrix,
+        combine_historical_rainfall_data,
+        get_monthly_transition_matrix_with_fallback,
+    )
+
+    dataframe = combine_historical_rainfall_data()
+
+    fallback = calculate_transition_matrix(dataframe)
+
+    result = get_monthly_transition_matrix_with_fallback(
+        dataframe,
+        month=1,
+    )
+
+    rain_index = STATES.index("rain")
+
+    assert np.allclose(
+        result[rain_index],
+        fallback[rain_index],
+    )
+
+    assert np.allclose(
+        result.sum(axis=1),
+        1.0,
+    )
+
+
+def test_monthly_transition_matrix_rejects_invalid_month():
+    from src.markov_calibration import (
+        combine_historical_rainfall_data,
+        get_monthly_transition_matrix_with_fallback,
+    )
+
+    dataframe = combine_historical_rainfall_data()
+
+    with pytest.raises(ValueError):
+        get_monthly_transition_matrix_with_fallback(
+            dataframe,
+            month=0,
+        )
+
+    with pytest.raises(ValueError):
+        get_monthly_transition_matrix_with_fallback(
+            dataframe,
+            month=13,
+        )

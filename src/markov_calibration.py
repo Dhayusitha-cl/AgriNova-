@@ -536,3 +536,122 @@ def calculate_monthly_transition_matrices(df):
         monthly_matrices[month] = matrix.to_numpy()
 
     return monthly_matrices
+def get_monthly_transition_matrix_with_fallback(
+    df,
+    month,
+    fallback_matrix=None,
+):
+    """
+    Return a monthly rainfall transition matrix with
+    state-level fallback to historical behaviour.
+
+    A monthly row is used when that current state has at
+    least one observed outgoing transition in the month.
+    If the monthly row has no observations, the corresponding
+    row from fallback_matrix is used.
+    """
+
+    if not 1 <= month <= 12:
+        raise ValueError(
+            "month must be between 1 and 12."
+        )
+
+    required_columns = {
+        "date",
+        "rainfall_state",
+    }
+
+    missing = required_columns - set(df.columns)
+
+    if missing:
+        raise ValueError(
+            f"Missing required columns: {sorted(missing)}"
+        )
+
+    data = df.copy()
+
+    data["date"] = pd.to_datetime(
+        data["date"]
+    )
+
+    data = data.sort_values(
+        "date"
+    ).reset_index(drop=True)
+
+    if fallback_matrix is None:
+        fallback_matrix = calculate_transition_matrix(
+            data
+        )
+
+    fallback_matrix = np.asarray(
+        fallback_matrix,
+        dtype=float,
+    )
+
+    validate_transition_matrix(
+        fallback_matrix
+    )
+
+    counts = pd.DataFrame(
+        0,
+        index=STATES,
+        columns=STATES,
+        dtype=int,
+    )
+
+    dates = data["date"].to_numpy()
+    states = data["rainfall_state"].to_numpy()
+
+    for i in range(len(data) - 1):
+
+        current_date = pd.Timestamp(
+            dates[i]
+        )
+
+        next_date = pd.Timestamp(
+            dates[i + 1]
+        )
+
+        if next_date != (
+            current_date + pd.Timedelta(days=1)
+        ):
+            continue
+
+        if current_date.month != month:
+            continue
+
+        current_state = states[i]
+        next_state = states[i + 1]
+
+        if (
+            current_state not in STATES
+            or next_state not in STATES
+        ):
+            continue
+
+        counts.loc[
+            current_state,
+            next_state,
+        ] += 1
+
+    row_totals = counts.sum(axis=1)
+
+    monthly_matrix = counts.div(
+        row_totals.replace(0, np.nan),
+        axis=0,
+    ).fillna(0.0)
+
+    result = monthly_matrix.to_numpy(
+        dtype=float
+    )
+
+    for i, state in enumerate(STATES):
+
+        if row_totals.loc[state] == 0:
+            result[i] = fallback_matrix[i]
+
+    validate_transition_matrix(
+        result
+    )
+
+    return result

@@ -18,6 +18,7 @@ import numpy as np
 from src.rainfall_amount_calibration import (
     load_processed_rainfall,
     sample_rainfall_amounts,
+    sample_month_state_rainfall_amounts,
 )
 
 
@@ -363,5 +364,152 @@ def generate_rainfall_scenario(
             "rainfall_state": state,
             "rainfall_mm": rainfall,
         })
+
+    return scenario
+def generate_calibrated_rainfall_scenario(
+    start_date,
+    num_days,
+    initial_state="dry",
+    district="yavatmal",
+    rainfall_data=None,
+    random_seed=None,
+):
+    """
+    Generate a rainfall scenario using historical seasonal calibration.
+
+    The transition matrix is selected internally from historical
+    rainfall behaviour. The caller does not provide a transition matrix.
+
+    Each simulated transition uses the calendar month of the
+    current simulation date. Sparse month/state combinations use
+    the state-level historical fallback.
+
+    Rainfall amounts are sampled empirically using month + rainfall
+    state.
+
+    Parameters
+    ----------
+    start_date : str or pandas.Timestamp
+        Date on which the simulation starts.
+
+    num_days : int
+        Number of days to simulate.
+
+    initial_state : str
+        Current rainfall state at the start of simulation.
+
+    district : str
+        District identifier.
+
+    rainfall_data : pandas.DataFrame or None
+        Historical processed rainfall data.
+
+    random_seed : int or None
+        Seed for reproducibility.
+
+    Returns
+    -------
+    list[dict]
+        Simulated daily rainfall scenario.
+    """
+
+    import pandas as pd
+
+    if num_days <= 0:
+        raise ValueError(
+            "num_days must be greater than zero."
+        )
+
+    if district.lower() != "yavatmal":
+        raise ValueError(
+            "Historical calibration is currently available "
+            "only for Yavatmal."
+        )
+
+    if initial_state not in RAINFALL_STATES:
+        raise ValueError(
+            f"Unknown initial state: {initial_state}"
+        )
+
+    simulation_date = pd.Timestamp(start_date)
+
+    if rainfall_data is None:
+        rainfall_data = load_processed_rainfall()
+
+    from src.markov_calibration import (
+        calculate_transition_matrix,
+        get_monthly_transition_matrix_with_fallback,
+    )
+
+    fallback_matrix = calculate_transition_matrix(
+        rainfall_data
+    )
+
+    rng = np.random.default_rng(random_seed)
+
+    current_state = initial_state
+    scenario = []
+
+    for day in range(num_days):
+
+        current_month = simulation_date.month
+
+        transition_matrix = (
+            get_monthly_transition_matrix_with_fallback(
+                rainfall_data,
+                month=current_month,
+                fallback_matrix=fallback_matrix,
+            )
+        )
+
+        current_index = RAINFALL_STATES.index(
+            current_state
+        )
+
+        if day == 0:
+            simulated_state = current_state
+        else:
+            next_index = rng.choice(
+                len(RAINFALL_STATES),
+                p=transition_matrix[current_index],
+            )
+
+            simulated_state = RAINFALL_STATES[
+                next_index
+            ]
+
+        if simulated_state == "dry":
+            rainfall = 0.0
+        else:
+            seed = int(
+                rng.integers(
+                    0,
+                    2**32 - 1,
+                )
+            )
+
+            rainfall = float(
+                sample_month_state_rainfall_amounts(
+                    rainfall_data,
+                    month=current_month,
+                    state=simulated_state,
+                    size=1,
+                    random_seed=seed,
+                )[0]
+            )
+
+        scenario.append(
+            {
+                "day": day + 1,
+                "date": simulation_date.strftime(
+                    "%Y-%m-%d"
+                ),
+                "rainfall_state": simulated_state,
+                "rainfall_mm": rainfall,
+            }
+        )
+
+        current_state = simulated_state
+        simulation_date += pd.Timedelta(days=1)
 
     return scenario
