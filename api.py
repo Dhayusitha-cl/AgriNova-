@@ -22,7 +22,8 @@ class DecisionRequest(BaseModel):
     soil_type: str
     current_moisture_mm: float = Field(ge=0)
     rainfall_yesterday_mm: float = Field(ge=0)
-    transition_matrix: list[list[float]]
+    transition_matrix: list[list[float]] | None = None
+    start_date: str | None = None
     num_simulations: int = Field(default=500, gt=0)
     days_to_simulate: int = Field(default=7, gt=0)
 
@@ -122,31 +123,40 @@ def decision(request: DecisionRequest):
             detail=f"Unknown soil type: {request.soil_type}",
         )
 
-    if len(request.transition_matrix) != 3:
+    if request.transition_matrix is not None:
+
+        if len(request.transition_matrix) != 3:
+            raise HTTPException(
+                status_code=400,
+                detail="Transition matrix must contain 3 rows.",
+            )
+
+        for row in request.transition_matrix:
+
+            if len(row) != 3:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Each transition matrix row must contain 3 values.",
+                )
+
+            if any(value < 0 or value > 1 for value in row):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Transition probabilities must be between 0 and 1.",
+                )
+
+            if abs(sum(row) - 1.0) > 0.01:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Each transition matrix row must sum approximately to 1.",
+                )
+
+    elif request.start_date is None:
+
         raise HTTPException(
             status_code=400,
-            detail="Transition matrix must contain 3 rows.",
+            detail="Either transition_matrix or start_date must be provided.",
         )
-
-    for row in request.transition_matrix:
-
-        if len(row) != 3:
-            raise HTTPException(
-                status_code=400,
-                detail="Each transition matrix row must contain 3 values.",
-            )
-
-        if any(value < 0 or value > 1 for value in row):
-            raise HTTPException(
-                status_code=400,
-                detail="Transition probabilities must be between 0 and 1.",
-            )
-
-        if abs(sum(row) - 1.0) > 0.01:
-            raise HTTPException(
-                status_code=400,
-                detail="Each transition matrix row must sum approximately to 1.",
-            )
 
     # -----------------------------------------------------
     # Run decision engine
@@ -161,6 +171,7 @@ def decision(request: DecisionRequest):
             transition_matrix=request.transition_matrix,
             num_simulations=request.num_simulations,
             days_to_simulate=request.days_to_simulate,
+            start_date=request.start_date,
         )
 
     except ValueError as exc:
