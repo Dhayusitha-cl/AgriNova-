@@ -16,7 +16,10 @@ import numpy as np
 
 from .crop_data import crops
 from .soil_data import soils
-from .monte_carlo_weather import generate_monte_carlo_scenarios
+from .monte_carlo_weather import (
+    generate_monte_carlo_scenarios,
+    generate_calibrated_monte_carlo_scenarios,
+)
 from .soil_water import simulate_soil_water
 from .crop_establishment import evaluate_establishment
 from .economic_engine import compare_all_decisions
@@ -56,29 +59,30 @@ def _validate_inputs(
             "rainfall_yesterday_mm cannot be negative."
         )
 
-    matrix = np.asarray(
-        transition_matrix,
-        dtype=float,
-    )
-
-    if matrix.shape != (3, 3):
-        raise ValueError(
-            "transition_matrix must have shape (3, 3)."
+    if transition_matrix is not None:
+        matrix = np.asarray(
+            transition_matrix,
+            dtype=float,
         )
 
-    if np.any(matrix < 0) or np.any(matrix > 1):
-        raise ValueError(
-            "transition probabilities must be between 0 and 1."
-        )
+        if matrix.shape != (3, 3):
+            raise ValueError(
+                "transition_matrix must have shape (3, 3)."
+            )
 
-    if not np.allclose(
-        matrix.sum(axis=1),
-        1.0,
-        atol=1e-5,
-    ):
-        raise ValueError(
-            "Each transition-matrix row must sum to 1."
-        )
+        if np.any(matrix < 0) or np.any(matrix > 1):
+            raise ValueError(
+                "transition probabilities must be between 0 and 1."
+            )
+
+        if not np.allclose(
+            matrix.sum(axis=1),
+            1.0,
+            atol=1e-5,
+        ):
+            raise ValueError(
+                "Each transition-matrix row must sum to 1."
+            )
 
     if num_simulations <= 0:
         raise ValueError(
@@ -387,6 +391,7 @@ def make_decision(
     num_simulations=500,
     days_to_simulate=14,
     random_seed=42,
+    start_date=None,
 ):
     """
     Generate a probabilistic pre-sowing decision.
@@ -446,13 +451,27 @@ def make_decision(
     # SOW TODAY
     # =========================================================
 
-    sow_scenarios = generate_monte_carlo_scenarios(
-        transition_matrix=transition_matrix,
-        num_days=simulation_days,
-        num_simulations=num_simulations,
-        initial_state=initial_state,
-        random_seed=random_seed,
-    )
+    if start_date is not None:
+        sow_scenarios = generate_calibrated_monte_carlo_scenarios(
+            start_date=start_date,
+            num_days=simulation_days,
+            num_simulations=num_simulations,
+            initial_state=initial_state,
+            random_seed=random_seed,
+        )
+    else:
+        if transition_matrix is None:
+            raise ValueError(
+                "Either start_date or transition_matrix must be provided."
+            )
+
+        sow_scenarios = generate_monte_carlo_scenarios(
+            transition_matrix=transition_matrix,
+            num_days=simulation_days,
+            num_simulations=num_simulations,
+            initial_state=initial_state,
+            random_seed=random_seed,
+        )
 
     germ_prob_today, trajectories = (
         _scenario_establishment_probability(
@@ -483,13 +502,22 @@ def make_decision(
         )
     )
 
-    wait_scenarios = generate_monte_carlo_scenarios(
-        transition_matrix=transition_matrix,
-        num_days=wait_simulation_days,
-        num_simulations=num_simulations,
-        initial_state=initial_state,
-        random_seed=random_seed + 1,
-    )
+    if start_date is not None:
+        wait_scenarios = generate_calibrated_monte_carlo_scenarios(
+            start_date=start_date,
+            num_days=wait_simulation_days,
+            num_simulations=num_simulations,
+            initial_state=initial_state,
+            random_seed=random_seed + 1,
+        )
+    else:
+        wait_scenarios = generate_monte_carlo_scenarios(
+            transition_matrix=transition_matrix,
+            num_days=wait_simulation_days,
+            num_simulations=num_simulations,
+            initial_state=initial_state,
+            random_seed=random_seed + 1,
+        )
 
     germ_prob_wait, wait_trajectories = (
         _safe_wait_trajectories(
