@@ -56,7 +56,7 @@ def test_switch_returns_expected_fields():
     assert result["decision"] == "Switch to Soybean"
     assert 0 <= result["success_probability"] <= 1
     assert isinstance(result["expected_profit"], (int, float))
-    assert result["risk_level"] == "Low"
+    assert result["risk_level"] == "High"
 
 
 def test_unknown_decision_is_handled():

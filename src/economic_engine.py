@@ -412,6 +412,13 @@ def _calculate_switch(
         - soybean["seed_cost_per_acre"]
     )
 
+    if germination_prob > 0.70:
+        risk_level = "Low"
+    elif germination_prob > 0.50:
+        risk_level = "Medium"
+    else:
+        risk_level = "High"
+
     return {
         "decision": "Switch to Soybean",
         "expected_profit": float(
@@ -426,7 +433,7 @@ def _calculate_switch(
         "worst_case_profit": float(
             soybean_expected_profit
         ),
-        "risk_level": "Low",
+        "risk_level": risk_level,
     }
 
 
