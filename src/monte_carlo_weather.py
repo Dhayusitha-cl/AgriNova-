@@ -18,6 +18,7 @@ def generate_calibrated_monte_carlo_scenarios(
     num_simulations=1000,
     initial_state="dry",
     random_seed=None,
+    rainfall_data=None,
 ):
     """
     Generate multiple rainfall scenarios using calibrated
@@ -62,7 +63,8 @@ def generate_calibrated_monte_carlo_scenarios(
     # CALIBRATION: perform expensive historical processing ONCE
     # ---------------------------------------------------------
 
-    rainfall_data = load_processed_rainfall()
+    if rainfall_data is None:
+        rainfall_data = load_processed_rainfall()
 
     fallback_matrix = calculate_transition_matrix(
         rainfall_data

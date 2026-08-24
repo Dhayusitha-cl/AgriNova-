@@ -392,6 +392,8 @@ def make_decision(
     days_to_simulate=14,
     random_seed=42,
     start_date=None,
+    rainfall_data=None,
+    initial_state=None,
 ):
     """
     Generate a probabilistic pre-sowing decision.
@@ -425,9 +427,10 @@ def make_decision(
     # INITIAL WEATHER STATE
     # =========================================================
 
-    initial_state = _get_initial_state(
-        rainfall_yesterday_mm
-    )
+    if initial_state is None:
+        initial_state = _get_initial_state(
+            rainfall_yesterday_mm
+        )
 
     # =========================================================
     # DETERMINE REQUIRED SIMULATION HORIZON
@@ -458,6 +461,7 @@ def make_decision(
             num_simulations=num_simulations,
             initial_state=initial_state,
             random_seed=random_seed,
+	    rainfall_data=rainfall_data,
         )
     else:
         if transition_matrix is None:
@@ -509,6 +513,7 @@ def make_decision(
             num_simulations=num_simulations,
             initial_state=initial_state,
             random_seed=random_seed + 1,
+            rainfall_data=rainfall_data,
         )
     else:
         wait_scenarios = generate_monte_carlo_scenarios(
@@ -517,6 +522,7 @@ def make_decision(
             num_simulations=num_simulations,
             initial_state=initial_state,
             random_seed=random_seed + 1,
+	    rainfall_data=rainfall_data,
         )
 
     germ_prob_wait, wait_trajectories = (

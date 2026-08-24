@@ -793,7 +793,6 @@ def generate_month_aware_monte_carlo_scenarios(
         scenarios.append(scenario)
 
     return scenarios
-    return scenarios
 def run_single_month_aware_backtest(
     dataframe,
     decision_date,
