@@ -558,3 +558,33 @@ def test_get_training_data_excludes_decision_date_and_future():
         training["date"]
         >= pd.Timestamp(decision_date)
     ).any()
+
+def test_get_initial_state_ignores_decision_date_and_future_data():
+    dataframe = pd.DataFrame(
+        {
+            "date": pd.to_datetime(
+                [
+                    "2024-06-18",
+                    "2024-06-19",
+                    "2024-06-20",
+                    "2024-06-21",
+                    "2024-06-22",
+                ]
+            ),
+            "rainfall_mm": [0, 5, 100, 0, 80],
+            "rainfall_state": [
+                "dry",
+                "drizzle",
+                "rain",
+                "dry",
+                "rain",
+            ],
+        }
+    )
+
+    initial_state = get_initial_state(
+        dataframe,
+        "2024-06-20",
+    )
+
+    assert initial_state == "drizzle"
