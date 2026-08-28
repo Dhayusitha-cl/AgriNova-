@@ -152,3 +152,18 @@ def test_switch_uses_supplied_soybean_probability():
         high_probability["expected_profit"]
         > low_probability["expected_profit"]
     )
+
+
+def test_sow_today_does_not_assume_unmodeled_recovery_when_establishment_fails():
+    result = calculate_economic_outcome(
+        crop_name="cotton",
+        soil_type="medium_black",
+        decision="sow_today",
+        germination_prob=0.0,
+        rainfall_yesterday_mm=0,
+        current_moisture_mm=10,
+    )
+
+    assert result["success_probability"] == 0.0
+    assert result["expected_profit"] == -3400.0
+    assert result["worst_case_profit"] == -3400.0

@@ -29,14 +29,9 @@ from src.soil_data import soils
 # Constants
 # ---------------------------------------------------------------------
 
+
 WAIT_DAYS = 5
 
-# Recovery assumptions are retained as explicit economic assumptions.
-LATE_SOYBEAN_YIELD_FACTOR_SOW_FAILURE = 0.70
-LATE_SOYBEAN_SUCCESS_PROBABILITY_SOW_FAILURE = 0.80
-
-LATE_SOYBEAN_YIELD_FACTOR_WAIT_FAILURE = 0.65
-LATE_SOYBEAN_SUCCESS_PROBABILITY_WAIT_FAILURE = 0.70
 
 
 # ---------------------------------------------------------------------
@@ -139,58 +134,33 @@ def _calculate_sow_today(
     """
     Calculate expected outcome when sowing the primary crop today.
 
-    Current model assumption:
-    If the primary crop fails, a late soybean recovery attempt is
-    possible. The recovery economics are deliberately kept simple.
+    The establishment probability is supplied by the physical model.
 
-    The primary crop establishment probability is supplied by the
-    physical simulation.
+    Expected profit:
+        P(success) * profit_if_success
+        +
+        P(failure) * profit_if_failure
+
+    Failure currently represents loss of the primary crop seed cost.
+    Recovery crops are not included here because their establishment
+    probability is not produced by the physical simulation.
     """
 
     crop = crops[crop_name]
-    soybean = crops["soybean"]
 
-    # Primary crop success outcome.
     success_profit = (
         crop["average_yield_per_acre"]
         * crop["market_price_per_quintal"]
         - crop["seed_cost_per_acre"]
     )
 
-    # Primary crop failure means seed cost is lost.
     failure_profit = -crop["seed_cost_per_acre"]
 
-    # Late soybean recovery assumption.
-    late_soybean_yield = (
-        soybean["average_yield_per_acre"]
-        * LATE_SOYBEAN_YIELD_FACTOR_SOW_FAILURE
-    )
-
-    late_soybean_profit = calculate_profit(
-        crop_name="soybean",
-        yield_per_acre=late_soybean_yield,
-        price_per_quintal=soybean[
-            "market_price_per_quintal"
-        ],
-        seed_cost=soybean[
-            "seed_cost_per_acre"
-        ],
-        success_probability=(
-            LATE_SOYBEAN_SUCCESS_PROBABILITY_SOW_FAILURE
-        ),
-    )
-
-    failure_probability = (
-        1.0 - germination_prob
-    )
+    failure_probability = 1.0 - germination_prob
 
     total_expected_profit = (
         germination_prob * success_profit
-        + failure_probability
-        * (
-            failure_profit
-            + late_soybean_profit
-        )
+        + failure_probability * failure_profit
     )
 
     if germination_prob > 0.70:
@@ -202,18 +172,10 @@ def _calculate_sow_today(
 
     return {
         "decision": "Sow Today",
-        "expected_profit": float(
-            total_expected_profit
-        ),
-        "success_probability": float(
-            germination_prob
-        ),
-        "best_case_profit": float(
-            success_profit
-        ),
-        "worst_case_profit": float(
-            failure_profit + late_soybean_profit
-        ),
+        "expected_profit": float(total_expected_profit),
+        "success_probability": float(germination_prob),
+        "best_case_profit": float(success_profit),
+        "worst_case_profit": float(failure_profit),
         "risk_level": risk_level,
     }
 
@@ -243,7 +205,6 @@ def _calculate_wait(
     """
 
     crop = crops[crop_name]
-    soybean = crops["soybean"]
 
     # -------------------------------------------------------------
     # Crop-specific yield penalty for waiting.
@@ -293,31 +254,6 @@ def _calculate_wait(
         success_probability=germination_prob,
     )
 
-    # -------------------------------------------------------------
-    # Simple late-soybean recovery assumption.
-    #
-    # This is retained as an explicit economic assumption rather
-    # than being confused with the physical WAIT probability.
-    # -------------------------------------------------------------
-
-    late_soybean_yield = (
-        soybean["average_yield_per_acre"]
-        * LATE_SOYBEAN_YIELD_FACTOR_WAIT_FAILURE
-    )
-
-    late_soybean_profit = calculate_profit(
-        crop_name="soybean",
-        yield_per_acre=late_soybean_yield,
-        price_per_quintal=soybean[
-            "market_price_per_quintal"
-        ],
-        seed_cost=soybean[
-            "seed_cost_per_acre"
-        ],
-        success_probability=(
-            LATE_SOYBEAN_SUCCESS_PROBABILITY_WAIT_FAILURE
-        ),
-    )
 
     # -------------------------------------------------------------
     # Expected WAIT outcome.
@@ -340,10 +276,7 @@ def _calculate_wait(
         risk_level = "High"
 
     # Worst case remains a simple late-soybean recovery scenario.
-    worst_case_profit = (
-        -crop["seed_cost_per_acre"]
-        + late_soybean_profit
-    )
+    worst_case_profit = -crop["seed_cost_per_acre"]
 
     # Best case is successful establishment of the delayed crop.
     best_case_profit = (
