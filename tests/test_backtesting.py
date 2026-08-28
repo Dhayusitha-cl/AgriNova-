@@ -355,3 +355,206 @@ def test_run_multi_date_backtest():
         .between(0, 100)
         .all()
     )
+
+
+def test_prepare_month_aware_calibration_uses_training_data_only():
+
+    from src.backtesting import (
+        prepare_month_aware_calibration,
+    )
+
+    dataframe = make_test_rainfall_data()
+
+    decision_date = "2024-06-20"
+
+    training = get_training_data(
+        dataframe,
+        decision_date,
+    )
+
+    calibration = prepare_month_aware_calibration(
+        training
+    )
+
+    assert set(calibration.keys()) == set(range(1, 13))
+
+    for month in range(1, 13):
+
+        assert "transition_matrix" in calibration[month]
+        assert "rainfall_values" in calibration[month]
+
+        matrix = np.asarray(
+            calibration[month]["transition_matrix"],
+            dtype=float,
+        )
+
+        assert matrix.shape == (3, 3)
+
+        assert np.allclose(
+            matrix.sum(axis=1),
+            1.0,
+        )
+
+        assert set(
+            calibration[month]["rainfall_values"].keys()
+        ) == {
+            "dry",
+            "drizzle",
+            "rain",
+        }
+
+
+def test_generate_month_aware_backtest_scenario():
+
+    from src.backtesting import (
+        generate_month_aware_backtest_scenario,
+    )
+
+    dataframe = make_test_rainfall_data()
+
+    training = get_training_data(
+        dataframe,
+        "2024-06-20",
+    )
+
+    scenario = generate_month_aware_backtest_scenario(
+        training_data=training,
+        start_date="2024-06-20",
+        horizon_days=5,
+        initial_state="rain",
+        random_seed=42,
+    )
+
+    assert len(scenario) == 5
+
+    assert scenario[0]["date"] == pd.Timestamp(
+        "2024-06-20"
+    )
+
+    assert scenario[-1]["date"] == pd.Timestamp(
+        "2024-06-24"
+    )
+
+    for day in scenario:
+
+        assert day["rainfall_state"] in [
+            "dry",
+            "drizzle",
+            "rain",
+        ]
+
+        assert day["rainfall_mm"] >= 0
+
+
+def test_generate_month_aware_monte_carlo_scenarios():
+
+    from src.backtesting import (
+        generate_month_aware_monte_carlo_scenarios,
+    )
+
+    dataframe = make_test_rainfall_data()
+
+    training = get_training_data(
+        dataframe,
+        "2024-06-20",
+    )
+
+    scenarios = (
+        generate_month_aware_monte_carlo_scenarios(
+            training_data=training,
+            start_date="2024-06-20",
+            horizon_days=5,
+            initial_state="rain",
+            num_simulations=20,
+            random_seed=42,
+        )
+    )
+
+    assert len(scenarios) == 20
+
+    assert all(
+        len(scenario) == 5
+        for scenario in scenarios
+    )
+
+
+def test_run_single_month_aware_backtest():
+
+    from src.backtesting import (
+        run_single_month_aware_backtest,
+    )
+
+    dataframe = make_test_rainfall_data()
+
+    result = run_single_month_aware_backtest(
+        dataframe=dataframe,
+        decision_date="2024-06-20",
+        horizon_days=5,
+        num_simulations=20,
+        random_seed=42,
+    )
+
+    assert result["decision_date"] == pd.Timestamp(
+        "2024-06-20"
+    )
+
+    assert result["initial_state"] in [
+        "dry",
+        "drizzle",
+        "rain",
+    ]
+
+    assert result["training_rows"] == 19
+    assert result["actual_future_rows"] == 5
+
+    assert result["actual_total_mm"] >= 0
+    assert result["simulated_mean_mm"] >= 0
+
+    assert 0 <= result["actual_percentile"] <= 100
+
+
+def test_run_single_month_aware_backtest_is_reproducible():
+
+    from src.backtesting import (
+        run_single_month_aware_backtest,
+    )
+
+    dataframe = make_test_rainfall_data()
+
+    result_1 = run_single_month_aware_backtest(
+        dataframe=dataframe,
+        decision_date="2024-06-20",
+        horizon_days=5,
+        num_simulations=20,
+        random_seed=42,
+    )
+
+    result_2 = run_single_month_aware_backtest(
+        dataframe=dataframe,
+        decision_date="2024-06-20",
+        horizon_days=5,
+        num_simulations=20,
+        random_seed=42,
+    )
+
+    assert result_1 == result_2
+
+def test_get_training_data_excludes_decision_date_and_future():
+    dataframe = make_test_rainfall_data()
+
+    decision_date = "2024-06-20"
+
+    training = get_training_data(
+        dataframe,
+        decision_date,
+    )
+
+    assert (
+        training["date"]
+        < pd.Timestamp(decision_date)
+    ).all()
+
+    assert not (
+        training["date"]
+        >= pd.Timestamp(decision_date)
+    ).any()
