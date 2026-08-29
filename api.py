@@ -193,6 +193,7 @@ def decision(request: DecisionRequest):
 
     return {
         "decision": result["decision"],
+        "economic_comparison": result["economic_comparison"],
         "germ_prob_today": result["germ_prob_today"],
         "germ_prob_wait": result["germ_prob_wait"],
         "germ_prob_soybean": result["germ_prob_soybean"],

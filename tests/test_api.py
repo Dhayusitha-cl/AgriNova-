@@ -44,6 +44,15 @@ def test_decision_success():
     assert "germ_prob_wait" in data
     assert "germ_prob_soybean" in data
     assert "confidence" in data
+    assert "economic_comparison" in data
+
+    economic = data["economic_comparison"]
+
+    assert "sow_today" in economic
+    assert "wait" in economic
+    assert "switch" in economic
+    assert "best_decision" in economic
+    assert "best_profit" in economic
 
 
 def test_invalid_crop():
