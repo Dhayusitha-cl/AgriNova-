@@ -464,6 +464,10 @@ def calculate_monthly_transition_matrices(df):
     Calculate rainfall-state transition matrices separately
     for each calendar month.
 
+    A transition is counted only when observations are on
+    consecutive calendar days. This prevents artificial
+    transitions across missing dates, months, or year boundaries.
+
     State order:
         dry
         drizzle
@@ -491,40 +495,72 @@ def calculate_monthly_transition_matrices(df):
 
     data["date"] = pd.to_datetime(data["date"])
 
+    data = (
+        data.sort_values("date")
+        .reset_index(drop=True)
+    )
+
     states = [
         "dry",
         "drizzle",
         "rain",
     ]
 
-    monthly_matrices = {}
-
-    for month in range(1, 13):
-
-        month_data = data[
-            data["date"].dt.month == month
-        ].copy()
-
-        counts = pd.DataFrame(
+    monthly_counts = {
+        month: pd.DataFrame(
             0,
             index=states,
             columns=states,
             dtype=int,
         )
+        for month in range(1, 13)
+    }
 
-        for current_state, next_state in zip(
-            month_data["rainfall_state"].iloc[:-1],
-            month_data["rainfall_state"].iloc[1:],
+    for current_row, next_row in zip(
+        data.iloc[:-1].itertuples(index=False),
+        data.iloc[1:].itertuples(index=False),
+    ):
+
+        current_date = pd.Timestamp(
+            current_row.date
+        )
+
+        next_date = pd.Timestamp(
+            next_row.date
+        )
+
+        # Only consecutive calendar-day observations
+        # are valid Markov transitions.
+        if next_date != (
+            current_date + pd.Timedelta(days=1)
         ):
+            continue
 
-            if (
-                current_state in states
-                and next_state in states
-            ):
-                counts.loc[
-                    current_state,
-                    next_state,
-                ] += 1
+        current_state = current_row.rainfall_state
+        next_state = next_row.rainfall_state
+
+        if (
+            current_state not in states
+            or next_state not in states
+        ):
+            continue
+
+        # Attribute transition to the month in which
+        # the current observation occurred.
+        month = current_date.month
+
+        monthly_counts[
+            month
+        ].loc[
+            current_state,
+            next_state,
+        ] += 1
+
+    monthly_matrices = {}
+
+    for month in range(1, 13):
+
+        counts = monthly_counts[month]
 
         row_totals = counts.sum(axis=1)
 

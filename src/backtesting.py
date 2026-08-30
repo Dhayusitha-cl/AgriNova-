@@ -487,13 +487,24 @@ def prepare_month_aware_calibration(
     calibration = {}
 
     # Full training-data transition matrix is the safe fallback.
-    full_transition_matrix = calculate_transition_matrix(
-        training_data
+    #
+    # Backtesting datasets may legitimately contain only a subset
+    # of rainfall states. Use add-one smoothing here so that the
+    # fallback remains a valid stochastic matrix even when a state
+    # has no observed outgoing transitions.
+    from src.markov_calibration import (
+       transition_counts_dataframe,
     )
 
-    full_transition_matrix = np.asarray(
-        full_transition_matrix,
-        dtype=float,
+    full_counts = transition_counts_dataframe(
+        training_data
+    ).to_numpy(dtype=float)
+
+    full_counts += 1.0
+
+    full_transition_matrix = (
+        full_counts
+        / full_counts.sum(axis=1, keepdims=True)
     )
 
     for month in range(1, 13):
@@ -571,6 +582,244 @@ def prepare_month_aware_calibration(
                     full_transition_matrix
                 )
 
+    rainfall_values = {}
+
+    for state in valid_states:
+
+        if state == "dry":
+
+            rainfall_values[state] = np.array(
+                [0.0],
+                dtype=float,
+            )
+
+            continue
+
+        monthly_state_values = (
+            monthly_training.loc[
+                monthly_training[
+                    "rainfall_state"
+                ] == state,
+                "rainfall_mm",
+            ]
+            .to_numpy(dtype=float)
+        )
+
+        # Same fallback rule as the original implementation.
+        if len(monthly_state_values) == 0:
+
+            monthly_state_values = (
+                training_data.loc[
+                    training_data[
+                        "rainfall_state"
+                    ] == state,
+                    "rainfall_mm",
+                ]
+                .to_numpy(dtype=float)
+            )
+
+        # Sparse/synthetic training data may contain no
+        # observations for a particular rainfall state.
+        # Keep the calibration structurally complete rather
+        # than failing during backtesting.
+        if len(monthly_state_values) == 0:
+
+            rainfall_values[state] = np.array(
+                [0.0],
+                dtype=float,
+            )
+
+        else:
+
+            rainfall_values[state] = (
+                monthly_state_values
+            )
+
+    calibration[month] = {
+        "transition_matrix": transition_matrix,
+        "rainfall_values": rainfall_values,
+    }
+
+    return calibration
+def prepare_month_aware_calibration(
+    training_data,
+):
+    """
+    Precompute month-specific transition matrices and rainfall
+    samples needed by the month-aware Monte Carlo simulator.
+
+    All calibration uses training_data only.
+
+    Important:
+    - Only consecutive observations within the same calendar month
+      and same year are used for month-specific transitions.
+    - A transition from the last day of one year/month to the first
+      day of another month/year is never created.
+    - If a month does not have enough transition observations,
+      the full training-data matrix is used as fallback.
+    """
+
+    import numpy as np
+
+    training_data = validate_rainfall_dataframe(
+        training_data
+    )
+
+    valid_states = [
+        "dry",
+        "drizzle",
+        "rain",
+    ]
+
+    calibration = {}
+
+    from src.markov_calibration import (
+        transition_counts_dataframe,
+    )
+
+    # ---------------------------------------------------------
+    # Build a leakage-safe full-training fallback matrix.
+    #
+    # Some small/synthetic datasets may not contain every state.
+    # Therefore calculate the matrix manually instead of calling
+    # calculate_transition_matrix(), which requires every state
+    # to have an observed outgoing transition.
+    # ---------------------------------------------------------
+
+    full_counts = transition_counts_dataframe(
+        training_data
+    ).to_numpy(dtype=float)
+
+    full_transition_matrix = np.zeros_like(
+        full_counts,
+        dtype=float,
+    )
+
+    for row_index in range(len(valid_states)):
+
+        row_total = full_counts[row_index].sum()
+
+        if row_total > 0:
+
+            full_transition_matrix[row_index] = (
+                full_counts[row_index]
+                / row_total
+            )
+
+        else:
+            # Completely unobserved state:
+            # keep the process in that state rather than inventing
+            # unsupported transitions.
+            full_transition_matrix[
+                row_index,
+                row_index,
+            ] = 1.0
+
+    # ---------------------------------------------------------
+    # Build calibration for every month.
+    # ---------------------------------------------------------
+
+    for month in range(1, 13):
+
+        monthly_training = training_data[
+            training_data["date"].dt.month == month
+        ].copy()
+
+        monthly_transition_data = []
+
+        # Group by year first so that we never create a transition
+        # between July 31 of one year and July 1 of another year.
+        for year, year_data in monthly_training.groupby(
+            monthly_training["date"].dt.year
+        ):
+
+            year_data = (
+                year_data
+                .sort_values("date")
+                .reset_index(drop=True)
+            )
+
+            if len(year_data) < 2:
+                continue
+
+            date_difference = (
+                year_data["date"].diff().dt.days
+            )
+
+            # Keep only genuinely consecutive observations.
+            consecutive_data = year_data[
+                date_difference.eq(1)
+                | date_difference.isna()
+            ].copy()
+
+            if len(consecutive_data) >= 2:
+                monthly_transition_data.append(
+                    consecutive_data
+                )
+
+        if monthly_transition_data:
+
+            monthly_training_for_transitions = pd.concat(
+                monthly_transition_data,
+                ignore_index=True,
+            )
+
+        else:
+
+            monthly_training_for_transitions = (
+                pd.DataFrame()
+            )
+
+        # Full training matrix is always the safe fallback.
+        transition_matrix = (
+            full_transition_matrix.copy()
+        )
+
+        # Use month-specific transitions only when there are
+        # sufficient consecutive observations.
+        if len(monthly_training_for_transitions) >= 30:
+
+            monthly_counts = (
+                transition_counts_dataframe(
+                    monthly_training_for_transitions
+                ).to_numpy(dtype=float)
+            )
+
+            monthly_matrix = np.zeros_like(
+                monthly_counts,
+                dtype=float,
+            )
+
+            for row_index in range(len(valid_states)):
+
+                row_total = monthly_counts[
+                    row_index
+                ].sum()
+
+                if row_total > 0:
+
+                    monthly_matrix[row_index] = (
+                        monthly_counts[row_index]
+                        / row_total
+                    )
+
+                else:
+
+                    # If this state has no outgoing transition
+                    # in the month-specific data, retain the
+                    # corresponding full-training fallback row.
+                    monthly_matrix[row_index] = (
+                        full_transition_matrix[
+                            row_index
+                        ]
+                    )
+
+            transition_matrix = monthly_matrix
+
+        # -----------------------------------------------------
+        # Rainfall amount distributions by state.
+        # -----------------------------------------------------
+
         rainfall_values = {}
 
         for state in valid_states:
@@ -584,6 +833,7 @@ def prepare_month_aware_calibration(
 
                 continue
 
+            # Prefer rainfall amounts from the current month.
             monthly_state_values = (
                 monthly_training.loc[
                     monthly_training[
@@ -594,7 +844,7 @@ def prepare_month_aware_calibration(
                 .to_numpy(dtype=float)
             )
 
-            # Same fallback rule as the original implementation.
+            # Fall back to all training observations for that state.
             if len(monthly_state_values) == 0:
 
                 monthly_state_values = (
@@ -607,11 +857,17 @@ def prepare_month_aware_calibration(
                     .to_numpy(dtype=float)
                 )
 
+            # If the state has never been observed in the training
+            # data, use zero rainfall rather than inventing a
+            # rainfall distribution.
+            #
+            # Normally this state should also have zero probability
+            # from observed-state transition rows.
             if len(monthly_state_values) == 0:
 
-                raise ValueError(
-                    f"No rainfall observations found "
-                    f"for state '{state}'."
+                monthly_state_values = np.array(
+                    [0.0],
+                    dtype=float,
                 )
 
             rainfall_values[state] = (
@@ -624,6 +880,7 @@ def prepare_month_aware_calibration(
         }
 
     return calibration
+
 def generate_month_aware_backtest_scenario(
     training_data,
     start_date,
@@ -635,11 +892,10 @@ def generate_month_aware_backtest_scenario(
     """
     Generate one leakage-safe rainfall scenario for backtesting.
 
-    Calibration may be supplied from
-    prepare_month_aware_calibration() to avoid repeating
-    expensive preprocessing.
+    Calibration is derived only from training_data.
 
-    All calibration must use training_data only.
+    The transition matrix and rainfall distribution are selected
+    according to the simulated calendar month.
     """
 
     import numpy as np
@@ -667,11 +923,8 @@ def generate_month_aware_backtest_scenario(
     start_date = pd.Timestamp(start_date)
 
     if calibration is None:
-
-        calibration = (
-            prepare_month_aware_calibration(
-                training_data
-            )
+        calibration = prepare_month_aware_calibration(
+            training_data
         )
 
     rng = np.random.default_rng(
@@ -701,14 +954,12 @@ def generate_month_aware_backtest_scenario(
             ]
         )
 
-        current_state_index = (
-            valid_states.index(
-                current_state
-            )
+        current_state_index = valid_states.index(
+            current_state
         )
 
         next_state_index = rng.choice(
-            [0, 1, 2],
+            len(valid_states),
             p=transition_matrix[
                 current_state_index
             ],
@@ -748,7 +999,6 @@ def generate_month_aware_backtest_scenario(
         current_state = next_state
 
     return scenario
-
 
 def generate_month_aware_monte_carlo_scenarios(
     training_data,
@@ -850,3 +1100,37 @@ def run_single_month_aware_backtest(
         "actual_future_rows": len(actual_future),
         **evaluation,
     }
+def run_multi_date_month_aware_backtest(
+    dataframe,
+    decision_dates,
+    horizon_days=14,
+    num_simulations=1000,
+    random_seed=42,
+):
+    """
+    Run leakage-safe month-aware backtesting across
+    multiple historical decision dates.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per historical decision date.
+    """
+
+    results = []
+
+    for i, decision_date in enumerate(
+        decision_dates
+    ):
+
+        result = run_single_month_aware_backtest(
+            dataframe=dataframe,
+            decision_date=decision_date,
+            horizon_days=horizon_days,
+            num_simulations=num_simulations,
+            random_seed=random_seed + i,
+        )
+
+        results.append(result)
+
+    return pd.DataFrame(results)

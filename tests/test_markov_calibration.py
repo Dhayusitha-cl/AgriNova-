@@ -237,3 +237,82 @@ def test_monthly_transition_matrix_rejects_invalid_month():
             dataframe,
             month=13,
         )
+def test_monthly_transition_matrix_ignores_nonconsecutive_dates():
+    from src.markov_calibration import (
+        calculate_monthly_transition_matrices,
+    )
+
+    dataframe = pd.DataFrame(
+        {
+            "date": pd.to_datetime(
+                [
+                    "2023-07-31",
+                    "2024-07-01",
+                ]
+            ),
+            "rainfall_state": [
+                "dry",
+                "rain",
+            ],
+        }
+    )
+
+    matrices = calculate_monthly_transition_matrices(
+        dataframe
+    )
+
+    # The dates are not consecutive, so no transition
+    # should be counted.
+    july_matrix = matrices[7]
+
+    assert np.allclose(
+        july_matrix,
+        np.zeros((3, 3)),
+    )
+def test_monthly_transition_matrix_counts_consecutive_dates():
+    from src.markov_calibration import (
+        calculate_monthly_transition_matrices,
+    )
+
+    dataframe = pd.DataFrame(
+        {
+            "date": pd.to_datetime(
+                [
+                    "2024-07-01",
+                    "2024-07-02",
+                    "2024-07-03",
+                ]
+            ),
+            "rainfall_state": [
+                "dry",
+                "drizzle",
+                "rain",
+            ],
+        }
+    )
+
+    matrices = calculate_monthly_transition_matrices(
+        dataframe
+    )
+
+    july_matrix = matrices[7]
+
+    dry = STATES.index("dry")
+    drizzle = STATES.index("drizzle")
+    rain = STATES.index("rain")
+
+    assert july_matrix[dry, drizzle] == 1.0
+    assert july_matrix[drizzle, rain] == 1.0
+
+    assert np.allclose(
+        july_matrix.sum(axis=1)[
+            [dry, drizzle]
+        ],
+        [1.0, 1.0],
+    )
+
+    # No outgoing transition from rain.
+    assert np.allclose(
+        july_matrix[rain],
+        [0.0, 0.0, 0.0],
+    )

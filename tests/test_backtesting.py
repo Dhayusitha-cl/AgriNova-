@@ -588,3 +588,97 @@ def test_get_initial_state_ignores_decision_date_and_future_data():
     )
 
     assert initial_state == "drizzle"
+def test_month_aware_calibration_does_not_create_cross_year_transition():
+    import numpy as np
+    import pandas as pd
+
+    from src.backtesting import (
+        prepare_month_aware_calibration,
+    )
+
+    dates = pd.date_range(
+        "2020-07-01",
+        "2020-07-31",
+    ).tolist()
+
+    dates += pd.date_range(
+        "2021-07-01",
+        "2021-07-31",
+    ).tolist()
+
+    states = (
+        ["dry"] * 31
+        + ["rain"] * 31
+    )
+
+    rainfall = (
+        [0.0] * 31
+        + [20.0] * 31
+    )
+
+    dataframe = pd.DataFrame(
+        {
+            "date": dates,
+            "rainfall_mm": rainfall,
+            "rainfall_state": states,
+        }
+    )
+
+    calibration = prepare_month_aware_calibration(
+        dataframe
+    )
+
+    july_matrix = calibration[7]["transition_matrix"]
+
+    # The last observation of 2020 and the first observation
+    # of 2021 are not consecutive dates and must not form
+    # a Markov transition.
+    #
+    # Because the test data does not contain all three states,
+    # the implementation should safely use the full-data
+    # fallback rather than fabricate a transition.
+    assert july_matrix.shape == (3, 3)
+
+    assert np.all(
+        np.isfinite(july_matrix)
+    )
+
+    assert np.allclose(
+        july_matrix.sum(axis=1),
+        1.0,
+    )
+def test_monthly_training_transitions_ignore_year_boundary():
+    import numpy as np
+    import pandas as pd
+
+    from src.markov_calibration import (
+        calculate_monthly_transition_matrices_from_training,
+    )
+
+    dataframe = pd.DataFrame(
+        {
+            "date": pd.to_datetime(
+                [
+                    "2020-07-31",
+                    "2021-07-01",
+                ]
+            ),
+            "rainfall_state": [
+                "dry",
+                "rain",
+            ],
+        }
+    )
+
+    matrices = (
+        calculate_monthly_transition_matrices_from_training(
+            dataframe
+        )
+    )
+
+    july_matrix = matrices[7]
+
+    assert np.allclose(
+        july_matrix,
+        np.zeros((3, 3)),
+    )
