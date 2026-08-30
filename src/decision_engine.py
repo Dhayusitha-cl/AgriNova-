@@ -474,6 +474,7 @@ def make_decision(
             num_days=simulation_days,
             num_simulations=num_simulations,
             initial_state=initial_state,
+	    rainfall_data=rainfall_data,
             random_seed=random_seed,
         )
 

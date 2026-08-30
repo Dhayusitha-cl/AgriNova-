@@ -316,11 +316,10 @@ def _calculate_switch(
     The supplied germination probability is interpreted as the
     estimated establishment probability for soybean.
 
-    Current model policy:
-    SWITCH is labelled as a low operational-risk alternative because
-    the action itself avoids continuing with the original crop.
+    The economic engine uses the soybean establishment probability
+    from the physical simulation to calculate expected profit.
 
-    The probability still directly affects expected monetary outcome.
+    Economic assumptions are model assumptions, not guarantees.
     """
 
     soybean = crops["soybean"]
@@ -345,6 +344,10 @@ def _calculate_switch(
         - soybean["seed_cost_per_acre"]
     )
 
+    soybean_worst_case_profit = (
+        -soybean["seed_cost_per_acre"]
+    )
+
     if germination_prob > 0.70:
         risk_level = "Low"
     elif germination_prob > 0.50:
@@ -364,10 +367,11 @@ def _calculate_switch(
             soybean_best_case_profit
         ),
         "worst_case_profit": float(
-            soybean_expected_profit
+            soybean_worst_case_profit
         ),
         "risk_level": risk_level,
     }
+
 
 
 # ---------------------------------------------------------------------
