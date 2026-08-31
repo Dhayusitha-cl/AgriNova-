@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+from datetime import date
 
 from src.crop_data import crops
 from src.soil_data import soils
@@ -23,7 +24,7 @@ class DecisionRequest(BaseModel):
     current_moisture_mm: float = Field(ge=0)
     rainfall_yesterday_mm: float = Field(ge=0)
     transition_matrix: list[list[float]] | None = None
-    start_date: str | None = None
+    start_date: date | None = None
     num_simulations: int = Field(default=500, gt=0)
     days_to_simulate: int = Field(default=7, gt=0)
 
@@ -171,7 +172,11 @@ def decision(request: DecisionRequest):
             transition_matrix=request.transition_matrix,
             num_simulations=request.num_simulations,
             days_to_simulate=request.days_to_simulate,
-            start_date=request.start_date,
+            start_date=(
+                request.start_date.isoformat()
+                if request.start_date is not None
+                else None
+            ),
         )
 
     except ValueError as exc:
