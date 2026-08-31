@@ -546,7 +546,7 @@ def compare_all_decisions(
 
         decision_result["advantage_over_others"] = float(
             decision_result["expected_profit"]
-            - min(other_profits)
+            - max(other_profits)
         )
 
     return {

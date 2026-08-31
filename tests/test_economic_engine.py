@@ -114,6 +114,8 @@ def test_compare_all_decisions_selects_highest_expected_profit():
     ]
 
     assert result["best_profit"] == max(profits)
+
+
 def test_expected_profit_uses_probability_once():
     result = calculate_economic_outcome(
         crop_name="cotton",
@@ -129,6 +131,8 @@ def test_expected_profit_uses_probability_once():
     ) - 3400
 
     assert result["best_case_profit"] == expected_best_case
+
+
 def test_switch_uses_supplied_soybean_probability():
     low_probability = calculate_economic_outcome(
         crop_name="cotton",
@@ -167,3 +171,32 @@ def test_sow_today_does_not_assume_unmodeled_recovery_when_establishment_fails()
     assert result["success_probability"] == 0.0
     assert result["expected_profit"] == -3400.0
     assert result["worst_case_profit"] == -3400.0
+
+def test_compare_all_decisions_advantage_is_against_best_alternative():
+    from src.economic_engine import compare_all_decisions
+
+    result = compare_all_decisions(
+        crop_name="cotton",
+        soil_type="medium_black",
+        germ_prob_today=0.30,
+        germ_prob_wait=0.20,
+        germ_prob_soybean=0.40,
+        rainfall_yesterday_mm=10.0,
+        current_moisture_mm=30.0,
+    )
+
+    decisions = result["all_decisions"]
+
+    for decision in decisions:
+        other_profits = [
+            other["expected_profit"]
+            for other in decisions
+            if other is not decision
+        ]
+
+        expected_advantage = (
+            decision["expected_profit"]
+            - max(other_profits)
+        )
+
+        assert decision["advantage_over_others"] == expected_advantage
