@@ -97,9 +97,18 @@ def update_soil_water(
     rainfall_mm = float(rainfall_mm)
     et_mm = float(et_mm)
 
+    field_capacity = float(
+        soils[soil_type]["field_capacity_mm"]
+    )
+
     if initial_water_mm < 0:
         raise ValueError(
             "initial_water_mm cannot be negative."
+        )
+
+    if initial_water_mm > field_capacity:
+        raise ValueError(
+            "initial_water_mm cannot exceed field capacity."
         )
 
     if rainfall_mm < 0:

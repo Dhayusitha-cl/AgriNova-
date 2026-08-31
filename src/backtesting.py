@@ -9,8 +9,11 @@ The key rule is:
 This prevents future-data leakage.
 """
 
-import pandas as pd
 
+import pandas as pd
+import numpy as np
+
+from src.rainfall_preprocessing import classify_rainfall
 
 def validate_rainfall_dataframe(dataframe):
     """Validate the minimum columns required for backtesting."""
@@ -258,11 +261,11 @@ def get_initial_state(dataframe, decision_date):
     """
     Get the rainfall state immediately before the decision date.
 
-    This is the state available to the model at the time of
-    the historical decision.
+    The state is recomputed from the observed rainfall amount
+    using the current classification rule rather than trusting
+    a potentially stale stored rainfall_state value.
 
-    The decision-date observation itself is excluded to prevent
-    future-data leakage.
+    Only observations strictly before the decision date are used.
     """
 
     dataframe = validate_rainfall_dataframe(dataframe)
@@ -278,18 +281,13 @@ def get_initial_state(dataframe, decision_date):
             "No observation exists before the decision date."
         )
 
-    previous_row = previous_data.iloc[-1]
+    previous_rainfall = float(
+        previous_data.iloc[-1]["rainfall_mm"]
+    )
 
-    initial_state = previous_row["rainfall_state"]
-
-    if initial_state not in {
-        "dry",
-        "drizzle",
-        "rain",
-    }:
-        raise ValueError(
-            f"Invalid initial rainfall state: {initial_state}"
-        )
+    initial_state = classify_rainfall(
+        previous_rainfall
+    )
 
     return initial_state
 def run_single_backtest(
@@ -956,3 +954,132 @@ def run_multi_date_month_aware_backtest(
         results.append(result)
 
     return pd.DataFrame(results)
+
+def evaluate_rainfall_simulation(
+    training_data,
+    actual_future,
+    start_date,
+    initial_state,
+    horizon_days=14,
+    num_simulations=1000,
+    random_seed=42,
+):
+    """
+    Evaluate Monte Carlo rainfall scenarios against held-out rainfall.
+
+    Training data is used only to generate simulated scenarios.
+    Actual future observations are used only for evaluation.
+
+    Returns
+    -------
+    dict
+        Simulation summary and comparison metrics.
+
+    Notes
+    -----
+    This evaluates rainfall-simulation behaviour only.
+    It is not a crop-establishment or decision-quality metric.
+    """
+
+    if training_data.empty:
+        raise ValueError(
+            "training_data cannot be empty."
+        )
+
+    if actual_future.empty:
+        raise ValueError(
+            "actual_future cannot be empty."
+        )
+
+    if horizon_days <= 0:
+        raise ValueError(
+            "horizon_days must be greater than zero."
+        )
+
+    if num_simulations <= 0:
+        raise ValueError(
+            "num_simulations must be greater than zero."
+        )
+
+    scenarios = generate_month_aware_monte_carlo_scenarios(
+        training_data=training_data,
+        start_date=pd.Timestamp(start_date),
+        horizon_days=horizon_days,
+        initial_state=initial_state,
+        num_simulations=num_simulations,
+        random_seed=random_seed,
+    )
+
+    if not scenarios:
+        raise ValueError(
+            "No Monte Carlo scenarios were generated."
+        )
+
+    simulated_totals = np.array(
+        [
+            sum(
+                float(day.get("rainfall_mm", 0.0))
+                for day in scenario
+            )
+            for scenario in scenarios
+        ],
+        dtype=float,
+    )
+
+    actual_rainfall = actual_future[
+        "rainfall_mm"
+    ].astype(float)
+
+    actual_total = float(
+        actual_rainfall.sum()
+    )
+
+    p10 = float(
+        np.percentile(
+            simulated_totals,
+            10,
+        )
+    )
+
+    p50 = float(
+        np.percentile(
+            simulated_totals,
+            50,
+        )
+    )
+
+    p90 = float(
+        np.percentile(
+            simulated_totals,
+            90,
+        )
+    )
+
+    simulated_mean = float(
+        simulated_totals.mean()
+    )
+
+    absolute_error = abs(
+        simulated_mean - actual_total
+    )
+
+    covered_by_p10_p90 = (
+        p10 <= actual_total <= p90
+    )
+
+    return {
+        "actual_total_mm": actual_total,
+        "simulated_mean_mm": simulated_mean,
+        "p10_mm": p10,
+        "p50_mm": p50,
+        "p90_mm": p90,
+        "absolute_error_mm": float(
+            absolute_error
+        ),
+        "covered_by_p10_p90": bool(
+            covered_by_p10_p90
+        ),
+        "num_simulations": int(
+            len(simulated_totals)
+        ),
+    }

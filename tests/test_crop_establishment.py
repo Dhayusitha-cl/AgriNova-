@@ -95,3 +95,84 @@ def test_establishment_requires_germination_period():
         assert False
     except ValueError:
         assert True
+
+
+def test_establishment_fails_if_one_germination_day_is_below_threshold():
+
+    soil_results = [
+        {
+            "day": day,
+            "final_water_mm": 30,
+        }
+        for day in range(1, 9)
+    ]
+
+    soil_results[4]["final_water_mm"] = 10
+
+    result = evaluate_establishment(
+        soil_water_results=soil_results,
+        crop="cotton",
+        soil_type="medium_black",
+    )
+
+    assert result["successful_days"] == 7
+    assert result["establishment_success"] is False
+
+
+def test_establishment_succeeds_at_exact_moisture_threshold():
+
+    soil_results = [
+        {
+            "day": day,
+            "final_water_mm": 15,
+        }
+        for day in range(1, 9)
+    ]
+
+    result = evaluate_establishment(
+        soil_water_results=soil_results,
+        crop="cotton",
+        soil_type="medium_black",
+    )
+
+    assert result["establishment_success"] is True
+
+
+def test_unknown_crop_is_rejected():
+
+    soil_results = [
+        {
+            "day": 1,
+            "final_water_mm": 30,
+        }
+    ]
+
+    try:
+        evaluate_establishment(
+            soil_water_results=soil_results,
+            crop="unknown_crop",
+            soil_type="medium_black",
+        )
+        assert False
+    except ValueError:
+        assert True
+
+
+def test_unknown_soil_is_rejected():
+
+    soil_results = [
+        {
+            "day": 1,
+            "final_water_mm": 30,
+        }
+    ]
+
+    try:
+        evaluate_establishment(
+            soil_water_results=soil_results,
+            crop="cotton",
+            soil_type="unknown_soil",
+        )
+        assert False
+    except ValueError:
+        assert True

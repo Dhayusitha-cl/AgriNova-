@@ -202,22 +202,23 @@ def _scenario_establishment_probability(
     )
 
 
+from src.rainfall_preprocessing import classify_rainfall
+
+
 def _get_initial_state(rainfall_yesterday_mm):
     """
-    Convert recent rainfall into the starting rainfall state.
-
-    These thresholds are model assumptions and should eventually
-    be calibrated against project rainfall-state preprocessing.
+    Convert recent rainfall into the starting rainfall state
+    using the project's centralized rainfall classification rule.
     """
 
-    if rainfall_yesterday_mm <= 0:
-        return "dry"
+    state = classify_rainfall(rainfall_yesterday_mm)
 
-    if rainfall_yesterday_mm < 10:
-        return "drizzle"
+    if state == "missing":
+        raise ValueError(
+            "rainfall_yesterday_mm cannot be missing."
+        )
 
-    return "rain"
-
+    return state
 
 def _calculate_confidence(
     germ_prob_today,

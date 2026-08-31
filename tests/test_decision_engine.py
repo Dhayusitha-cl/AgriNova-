@@ -5,6 +5,7 @@ from src.decision_engine import (
     calculate_daily_et,
     _get_initial_state,
     _calculate_confidence,
+    _scenario_establishment_probability,
     make_decision,
 )
 
@@ -262,6 +263,8 @@ def test_zero_days_are_rejected():
             num_simulations=20,
             days_to_simulate=0,
         )
+
+
 def test_make_decision_includes_economic_comparison():
     result = make_decision(
         crop_name="cotton",
@@ -288,6 +291,8 @@ def test_make_decision_includes_economic_comparison():
         economic["best_profit"],
         (int, float),
     )
+
+
 def test_final_decision_matches_economic_best_decision():
     result = make_decision(
         crop_name="cotton",
@@ -309,3 +314,121 @@ def test_final_decision_matches_economic_best_decision():
     }
 
     assert result["decision"] == mapping[economic_best]
+
+
+def test_scenario_establishment_probability_all_successful():
+
+    scenarios = [
+        [
+            {"rainfall_mm": 10.0, "state": "rain"}
+            for _ in range(8)
+        ],
+        [
+            {"rainfall_mm": 10.0, "state": "rain"}
+            for _ in range(8)
+        ],
+    ]
+
+    probability, trajectories = _scenario_establishment_probability(
+        scenarios=scenarios,
+        crop_name="cotton",
+        soil_type="medium_black",
+        initial_moisture_mm=30.0,
+    )
+
+    assert probability == 1.0
+    assert trajectories.shape == (2, 9)
+
+
+def test_scenario_establishment_probability_all_failed():
+
+    scenarios = [
+        [
+            {"rainfall_mm": 0.0, "state": "dry"}
+            for _ in range(8)
+        ],
+        [
+            {"rainfall_mm": 0.0, "state": "dry"}
+            for _ in range(8)
+        ],
+    ]
+
+    probability, trajectories = _scenario_establishment_probability(
+        scenarios=scenarios,
+        crop_name="cotton",
+        soil_type="medium_black",
+        initial_moisture_mm=0.0,
+    )
+
+    assert probability == 0.0
+    assert trajectories.shape == (2, 9)
+
+
+def test_scenario_establishment_probability_mixed_outcomes():
+
+    scenarios = [
+        [
+            {"rainfall_mm": 20.0, "state": "rain"}
+            for _ in range(8)
+        ],
+        [
+            {"rainfall_mm": 0.0, "state": "dry"}
+            for _ in range(8)
+        ],
+    ]
+
+    probability, trajectories = _scenario_establishment_probability(
+        scenarios=scenarios,
+        crop_name="cotton",
+        soil_type="medium_black",
+        initial_moisture_mm=0.0,
+    )
+
+    assert probability == 0.5
+    assert trajectories.shape == (2, 9)
+
+
+def test_make_decision_is_reproducible_with_same_seed():
+
+    result_1 = make_decision(
+        crop_name="cotton",
+        soil_type="medium_black",
+        current_moisture_mm=30.0,
+        rainfall_yesterday_mm=10.0,
+        transition_matrix=VALID_MATRIX,
+        num_simulations=20,
+        days_to_simulate=8,
+        random_seed=123,
+    )
+
+    result_2 = make_decision(
+        crop_name="cotton",
+        soil_type="medium_black",
+        current_moisture_mm=30.0,
+        rainfall_yesterday_mm=10.0,
+        transition_matrix=VALID_MATRIX,
+        num_simulations=20,
+        days_to_simulate=8,
+        random_seed=123,
+    )
+
+    assert result_1["decision"] == result_2["decision"]
+
+    assert result_1["germ_prob_today"] == result_2["germ_prob_today"]
+    assert result_1["germ_prob_wait"] == result_2["germ_prob_wait"]
+    assert result_1["germ_prob_soybean"] == result_2["germ_prob_soybean"]
+
+    np.testing.assert_array_equal(
+        result_1["trajectories"],
+        result_2["trajectories"],
+    )
+
+    np.testing.assert_array_equal(
+        result_1["wait_simulations"],
+        result_2["wait_simulations"],
+    )
+
+    np.testing.assert_array_equal(
+        result_1["soybean_trajectories"],
+        result_2["soybean_trajectories"],
+    )
