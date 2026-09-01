@@ -223,6 +223,10 @@ def decision(request: DecisionRequest):
         "confidence": result["confidence"],
         "current_moisture": result["current_moisture"],
         "min_moisture_required": result["min_moisture_required"],
+        "initial_rainfall_state": result["initial_rainfall_state"],
+        "num_simulations": result["num_simulations"],
+        "days_to_simulate": result["days_to_simulate"],
+        "assumptions": result["assumptions"],
 
         "soil_moisture_today": {
             "mean": trajectories.mean(axis=0).tolist(),

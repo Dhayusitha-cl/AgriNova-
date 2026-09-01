@@ -54,6 +54,15 @@ def test_decision_success():
     assert "best_decision" in economic
     assert "best_profit" in economic
 
+    assert "initial_rainfall_state" in data
+    assert "num_simulations" in data
+    assert "days_to_simulate" in data
+    assert "assumptions" in data
+
+    assert data["num_simulations"] == 10
+    assert data["days_to_simulate"] == 7
+    assert isinstance(data["assumptions"], dict)
+
 
 def test_invalid_crop():
     payload = valid_payload()
