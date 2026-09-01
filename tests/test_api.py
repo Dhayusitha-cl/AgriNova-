@@ -122,3 +122,20 @@ def test_rounded_transition_matrix_returns_400():
 
     assert response.status_code == 400
     assert "transition" in response.json()["detail"].lower()
+
+
+def test_unexpected_decision_error_returns_500(monkeypatch):
+    def failing_decision(*args, **kwargs):
+        raise RuntimeError("simulated internal failure")
+
+    monkeypatch.setattr("api.make_decision", failing_decision)
+
+    response = client.post(
+        "/api/v1/decision",
+        json=valid_payload()
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == (
+        "Internal server error while processing the decision."
+    )

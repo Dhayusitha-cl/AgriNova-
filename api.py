@@ -196,6 +196,12 @@ def decision(request: DecisionRequest):
             status_code=400,
             detail=str(exc),
         ) from exc
+    except Exception:
+        logger.exception("Unexpected error while processing decision request")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error while processing the decision.",
+        )
 
     # -----------------------------------------------------
     # Extract simulation results
