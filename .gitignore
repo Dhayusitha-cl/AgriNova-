@@ -4,5 +4,4 @@ __pycache__/
 venv/
 .venv/
 docs/
-python
 data/raw/
