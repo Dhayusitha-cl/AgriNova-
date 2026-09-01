@@ -529,13 +529,13 @@ def compare_all_decisions(
         switch,
     ]
 
-    # Select the option with the highest expected profit.
+    # Select the option with the highest expected economic value.
     best_decision = max(
         decisions,
         key=lambda result: result["expected_profit"],
     )
 
-    # Calculate advantage relative to the weakest alternative.
+    # Calculate advantage relative to the strongest alternative.
     for decision_result in decisions:
 
         other_profits = [

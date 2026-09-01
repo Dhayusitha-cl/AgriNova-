@@ -200,3 +200,40 @@ def test_compare_all_decisions_advantage_is_against_best_alternative():
         )
 
         assert decision["advantage_over_others"] == expected_advantage
+
+
+def test_compare_all_decisions_uses_each_probability_for_its_decision():
+    result = compare_all_decisions(
+        crop_name="cotton",
+        soil_type="medium_black",
+        germ_prob_today=0.90,
+        germ_prob_wait=0.20,
+        germ_prob_soybean=0.40,
+        rainfall_yesterday_mm=10,
+        current_moisture_mm=100,
+    )
+
+    assert result["sow_today"]["success_probability"] == 0.90
+    assert result["wait"]["success_probability"] == 0.20
+    assert result["switch"]["success_probability"] == 0.40
+
+
+def test_expected_profit_matches_probability_weighted_outcomes():
+    result = calculate_economic_outcome(
+        crop_name="cotton",
+        soil_type="medium_black",
+        decision="sow_today",
+        germination_prob=0.50,
+        rainfall_yesterday_mm=10,
+        current_moisture_mm=100,
+    )
+
+    success_profit = (10 * 6500) - 3400
+    failure_profit = -3400
+
+    expected_profit = (
+        0.50 * success_profit
+        + 0.50 * failure_profit
+    )
+
+    assert result["expected_profit"] == expected_profit
