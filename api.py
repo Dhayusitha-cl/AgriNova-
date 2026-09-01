@@ -19,14 +19,14 @@ app = FastAPI(
 # ---------------------------------------------------------
 
 class DecisionRequest(BaseModel):
-    crop_name: str
-    soil_type: str
-    current_moisture_mm: float = Field(ge=0)
-    rainfall_yesterday_mm: float = Field(ge=0)
+    crop_name: str = Field(min_length=1, max_length=50)
+    soil_type: str = Field(min_length=1, max_length=50)
+    current_moisture_mm: float = Field(ge=0, le=500)
+    rainfall_yesterday_mm: float = Field(ge=0, le=1000)
     transition_matrix: list[list[float]] | None = None
     start_date: date | None = None
-    num_simulations: int = Field(default=500, gt=0)
-    days_to_simulate: int = Field(default=7, gt=0)
+    num_simulations: int = Field(default=500, ge=0, le=10000)
+    days_to_simulate: int = Field(default=7, ge=1, le=30)
 
 
 # ---------------------------------------------------------
