@@ -1,6 +1,9 @@
+import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from datetime import date
+
+logger = logging.getLogger("croplogic_saathi")
 
 from src.crop_data import crops
 from src.soil_data import soils
@@ -164,6 +167,14 @@ def decision(request: DecisionRequest):
     # -----------------------------------------------------
 
     try:
+        logger.info(
+            "Decision request: crop=%s soil=%s simulations=%d days=%d",
+            request.crop_name,
+            request.soil_type,
+            request.num_simulations,
+            request.days_to_simulate,
+        )
+
         result = make_decision(
             crop_name=request.crop_name,
             soil_type=request.soil_type,
@@ -180,6 +191,7 @@ def decision(request: DecisionRequest):
         )
 
     except ValueError as exc:
+        logger.warning("Decision validation error: %s", exc)
         raise HTTPException(
             status_code=400,
             detail=str(exc),
