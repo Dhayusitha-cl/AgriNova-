@@ -432,3 +432,142 @@ def test_make_decision_is_reproducible_with_same_seed():
         result_1["soybean_trajectories"],
         result_2["soybean_trajectories"],
     )
+
+def test_nan_moisture_is_rejected():
+    with pytest.raises(
+        ValueError,
+        match="current_moisture_mm must be a finite number",
+    ):
+        make_decision(
+            crop_name="cotton",
+            soil_type="medium_black",
+            current_moisture_mm=float("nan"),
+            rainfall_yesterday_mm=10,
+            transition_matrix=VALID_MATRIX,
+            num_simulations=20,
+            days_to_simulate=14,
+        )
+
+
+def test_infinite_moisture_is_rejected():
+    with pytest.raises(
+        ValueError,
+        match="current_moisture_mm must be a finite number",
+    ):
+        make_decision(
+            crop_name="cotton",
+            soil_type="medium_black",
+            current_moisture_mm=float("inf"),
+            rainfall_yesterday_mm=10,
+            transition_matrix=VALID_MATRIX,
+            num_simulations=20,
+            days_to_simulate=14,
+        )
+
+
+def test_nan_rainfall_is_rejected():
+    with pytest.raises(
+        ValueError,
+        match="rainfall_yesterday_mm must be a finite number",
+    ):
+        make_decision(
+            crop_name="cotton",
+            soil_type="medium_black",
+            current_moisture_mm=40,
+            rainfall_yesterday_mm=float("nan"),
+            transition_matrix=VALID_MATRIX,
+            num_simulations=20,
+            days_to_simulate=14,
+        )
+
+
+def test_infinite_rainfall_is_rejected():
+    with pytest.raises(
+        ValueError,
+        match="rainfall_yesterday_mm must be a finite number",
+    ):
+        make_decision(
+            crop_name="cotton",
+            soil_type="medium_black",
+            current_moisture_mm=40,
+            rainfall_yesterday_mm=float("inf"),
+            transition_matrix=VALID_MATRIX,
+            num_simulations=20,
+            days_to_simulate=14,
+        )
+
+
+def test_nan_transition_matrix_is_rejected():
+    invalid_matrix = [
+        [0.60, 0.30, float("nan")],
+        [0.20, 0.60, 0.20],
+        [0.10, 0.30, 0.60],
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="transition probabilities must be finite numbers",
+    ):
+        make_decision(
+            crop_name="cotton",
+            soil_type="medium_black",
+            current_moisture_mm=40,
+            rainfall_yesterday_mm=10,
+            transition_matrix=invalid_matrix,
+            num_simulations=20,
+            days_to_simulate=14,
+        )
+
+
+def test_infinite_transition_matrix_is_rejected():
+    invalid_matrix = [
+        [0.60, 0.30, float("inf")],
+        [0.20, 0.60, 0.20],
+        [0.10, 0.30, 0.60],
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="transition probabilities must be finite numbers",
+    ):
+        make_decision(
+            crop_name="cotton",
+            soil_type="medium_black",
+            current_moisture_mm=40,
+            rainfall_yesterday_mm=10,
+            transition_matrix=invalid_matrix,
+            num_simulations=20,
+            days_to_simulate=14,
+        )
+
+
+def test_non_integer_simulations_are_rejected():
+    with pytest.raises(
+        ValueError,
+        match="num_simulations must be an integer",
+    ):
+        make_decision(
+            crop_name="cotton",
+            soil_type="medium_black",
+            current_moisture_mm=40,
+            rainfall_yesterday_mm=10,
+            transition_matrix=VALID_MATRIX,
+            num_simulations=20.5,
+            days_to_simulate=14,
+        )
+
+
+def test_non_integer_days_are_rejected():
+    with pytest.raises(
+        ValueError,
+        match="days_to_simulate must be an integer",
+    ):
+        make_decision(
+            crop_name="cotton",
+            soil_type="medium_black",
+            current_moisture_mm=40,
+            rainfall_yesterday_mm=10,
+            transition_matrix=VALID_MATRIX,
+            num_simulations=20,
+            days_to_simulate=14.5,
+        )

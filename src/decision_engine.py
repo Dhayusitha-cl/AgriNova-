@@ -42,6 +42,15 @@ def _validate_inputs(
     if soil_type not in soils:
         raise ValueError(f"Unknown soil type: {soil_type}")
 
+    current_moisture_mm = float(
+        current_moisture_mm
+    )
+
+    if not np.isfinite(current_moisture_mm):
+        raise ValueError(
+            "current_moisture_mm must be a finite number."
+        )
+
     if current_moisture_mm < 0:
         raise ValueError(
             "current_moisture_mm cannot be negative."
@@ -52,6 +61,15 @@ def _validate_inputs(
     if current_moisture_mm > field_capacity:
         raise ValueError(
             "current_moisture_mm cannot exceed field capacity."
+        )
+
+    rainfall_yesterday_mm = float(
+        rainfall_yesterday_mm
+    )
+
+    if not np.isfinite(rainfall_yesterday_mm):
+        raise ValueError(
+            "rainfall_yesterday_mm must be a finite number."
         )
 
     if rainfall_yesterday_mm < 0:
@@ -70,6 +88,11 @@ def _validate_inputs(
                 "transition_matrix must have shape (3, 3)."
             )
 
+        if not np.all(np.isfinite(matrix)):
+            raise ValueError(
+                "transition probabilities must be finite numbers."
+        )
+
         if np.any(matrix < 0) or np.any(matrix > 1):
             raise ValueError(
                 "transition probabilities must be between 0 and 1."
@@ -84,9 +107,31 @@ def _validate_inputs(
                 "Each transition-matrix row must sum to 1."
             )
 
+    if isinstance(
+        num_simulations,
+        (bool, np.bool_),
+    ) or not isinstance(
+        num_simulations,
+        (int, np.integer),
+    ):
+        raise ValueError(
+            "num_simulations must be an integer."
+         )
+
     if num_simulations <= 0:
         raise ValueError(
             "num_simulations must be greater than zero."
+        )
+
+    if isinstance(
+        days_to_simulate,
+        (bool, np.bool_),
+    ) or not isinstance(
+        days_to_simulate,
+        (int, np.integer),
+    ):
+        raise ValueError(
+            "days_to_simulate must be an integer."
         )
 
     if days_to_simulate <= 0:
