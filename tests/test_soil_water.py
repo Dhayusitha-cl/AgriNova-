@@ -1,21 +1,9 @@
 import pytest
 
 from src.soil_water import (
-    calculate_effective_rainfall,
     simulate_soil_water,
     update_soil_water,
 )
-
-def test_effective_rainfall_rejects_negative_values():
-
-    try:
-        calculate_effective_rainfall(
-            -1,
-            "medium_black",
-        )
-        assert False
-    except ValueError:
-        assert True
 
 
 def test_update_soil_water_increases_after_rain():
@@ -231,3 +219,79 @@ def test_soil_types_have_different_storage_limits():
     assert sandy["final_water_mm"] == 36
     assert medium["final_water_mm"] == 50
     assert deep["final_water_mm"] == 50
+
+def test_update_soil_water_rejects_nan_initial_water():
+
+    with pytest.raises(ValueError, match="initial_water_mm must be a finite number"):
+        update_soil_water(
+            initial_water_mm=float("nan"),
+            rainfall_mm=0,
+            et_mm=0,
+            soil_type="medium_black",
+        )
+
+
+def test_update_soil_water_rejects_infinite_initial_water():
+
+    with pytest.raises(ValueError, match="initial_water_mm must be a finite number"):
+        update_soil_water(
+            initial_water_mm=float("inf"),
+            rainfall_mm=0,
+            et_mm=0,
+            soil_type="medium_black",
+        )
+
+
+def test_update_soil_water_rejects_nan_rainfall():
+
+    with pytest.raises(ValueError, match="rainfall_mm must be a finite number"):
+        update_soil_water(
+            initial_water_mm=30,
+            rainfall_mm=float("nan"),
+            et_mm=0,
+            soil_type="medium_black",
+        )
+
+
+def test_update_soil_water_rejects_infinite_rainfall():
+
+    with pytest.raises(ValueError, match="rainfall_mm must be a finite number"):
+        update_soil_water(
+            initial_water_mm=30,
+            rainfall_mm=float("inf"),
+            et_mm=0,
+            soil_type="medium_black",
+        )
+
+
+def test_update_soil_water_rejects_nan_et():
+
+    with pytest.raises(ValueError, match="et_mm must be a finite number"):
+        update_soil_water(
+            initial_water_mm=30,
+            rainfall_mm=0,
+            et_mm=float("nan"),
+            soil_type="medium_black",
+        )
+
+
+def test_update_soil_water_rejects_infinite_et():
+
+    with pytest.raises(ValueError, match="et_mm must be a finite number"):
+        update_soil_water(
+            initial_water_mm=30,
+            rainfall_mm=0,
+            et_mm=float("inf"),
+            soil_type="medium_black",
+        )
+
+def test_simulate_soil_water_defaults_to_half_field_capacity():
+
+    results = simulate_soil_water(
+        rainfall_series=[0],
+        et_series=[0],
+        soil_type="medium_black",
+    )
+
+    assert results[0]["initial_water_mm"] == 30
+    assert results[0]["final_water_mm"] == 30

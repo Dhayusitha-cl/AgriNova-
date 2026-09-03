@@ -26,42 +26,6 @@ def validate_soil_type(soil_type):
     return True
 
 
-def calculate_effective_rainfall(
-    rainfall_mm,
-    soil_type,
-):
-    """
-    Estimate rainfall entering the soil.
-
-    Rainfall above the soil's field capacity is allowed
-    to contribute only up to the available storage.
-
-    Parameters
-    ----------
-    rainfall_mm : float
-        Daily rainfall in mm.
-
-    soil_type : str
-        Soil type from src.soil_data.
-
-    Returns
-    -------
-    float
-        Rainfall available for soil-water storage.
-    """
-
-    validate_soil_type(soil_type)
-
-    rainfall_mm = float(rainfall_mm)
-
-    if rainfall_mm < 0:
-        raise ValueError(
-            "rainfall_mm cannot be negative."
-        )
-
-    return rainfall_mm
-
-
 def update_soil_water(
     initial_water_mm,
     rainfall_mm,
@@ -101,6 +65,21 @@ def update_soil_water(
         soils[soil_type]["field_capacity_mm"]
     )
 
+    if not np.isfinite(initial_water_mm):
+        raise ValueError(
+            "initial_water_mm must be a finite number."
+        )
+
+    if not np.isfinite(rainfall_mm):
+        raise ValueError(
+            "rainfall_mm must be a finite number."
+        )
+
+    if not np.isfinite(et_mm):
+        raise ValueError(
+            "et_mm must be a finite number."
+        )
+
     if initial_water_mm < 0:
         raise ValueError(
             "initial_water_mm cannot be negative."
@@ -120,10 +99,6 @@ def update_soil_water(
         raise ValueError(
             "et_mm cannot be negative."
         )
-
-    field_capacity = float(
-        soils[soil_type]["field_capacity_mm"]
-    )
 
     water_before_et = initial_water_mm + rainfall_mm
 
@@ -177,6 +152,9 @@ def simulate_soil_water(
         Initial soil-water storage.
 
         If None, starts at 50% of field capacity.
+        This 50% initialization is a modelling assumption used
+        when observed initial soil-water storage is unavailable.
+        It is not an observed field measurement.
 
     Returns
     -------
@@ -207,16 +185,6 @@ def simulate_soil_water(
         current_water = field_capacity * 0.5
     else:
         current_water = float(initial_water_mm)
-
-    if current_water < 0:
-        raise ValueError(
-            "initial_water_mm cannot be negative."
-        )
-
-    if current_water > field_capacity:
-        raise ValueError(
-            "initial_water_mm cannot exceed field capacity."
-        )
 
     results = []
 
