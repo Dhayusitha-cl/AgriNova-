@@ -13,31 +13,19 @@ This prevents future-data leakage.
 import pandas as pd
 import numpy as np
 
-from src.rainfall_preprocessing import classify_rainfall
+from src.rainfall_preprocessing import (
+    classify_rainfall,
+    validate_daily_rainfall_observations,
+)
 
 def validate_rainfall_dataframe(dataframe):
-    """Validate the minimum columns required for backtesting."""
+    """
+    Backward-compatible wrapper for the canonical daily rainfall
+    observation validator.
+    """
 
-    required_columns = {
-        "date",
-        "rainfall_mm",
-        "rainfall_state",
-    }
+    return validate_daily_rainfall_observations(dataframe)
 
-    missing_columns = required_columns - set(dataframe.columns)
-
-    if missing_columns:
-        raise ValueError(
-            f"Missing required columns: {sorted(missing_columns)}"
-        )
-
-    dataframe = dataframe.copy()
-
-    dataframe["date"] = pd.to_datetime(dataframe["date"])
-
-    dataframe = dataframe.sort_values("date").reset_index(drop=True)
-
-    return dataframe
 
 
 def get_training_data(dataframe, decision_date):
@@ -48,7 +36,7 @@ def get_training_data(dataframe, decision_date):
     represent information known before the decision.
     """
 
-    dataframe = validate_rainfall_dataframe(dataframe)
+    dataframe = validate_daily_rainfall_observations(dataframe)
 
     decision_date = pd.Timestamp(decision_date)
 
@@ -82,7 +70,7 @@ def get_actual_future_data(
             "horizon_days must be greater than zero."
         )
 
-    dataframe = validate_rainfall_dataframe(dataframe)
+    dataframe = validate_daily_rainfall_observations(dataframe)
 
     decision_date = pd.Timestamp(decision_date)
 
@@ -100,6 +88,31 @@ def get_actual_future_data(
         raise ValueError(
             "No actual future observations found for "
             f"decision date {decision_date.date()}."
+        )
+
+    expected_dates = pd.date_range(
+        start=decision_date,
+        periods=horizon_days,
+        freq="D",
+    )
+
+    actual_dates = future_data["date"].reset_index(
+        drop=True
+    )
+
+    if len(future_data) != horizon_days:
+        raise ValueError(
+            "Actual future observations do not cover the "
+            f"complete {horizon_days}-day horizon starting "
+            f"on {decision_date.date()}."
+        )
+
+    if not actual_dates.equals(
+        pd.Series(expected_dates, name="date")
+    ):
+        raise ValueError(
+            "Actual future observations contain missing or "
+            "non-consecutive dates."
         )
 
     return future_data.reset_index(drop=True)
@@ -154,7 +167,7 @@ def calibrate_backtest_transition_matrix(training_data):
     This function must never receive future observations.
     """
 
-    training_data = validate_rainfall_dataframe(
+    training_data = validate_daily_rainfall_observations(
         training_data
     )
 
@@ -169,7 +182,7 @@ def calculate_actual_future_total(actual_future):
     the held-out future period.
     """
 
-    actual_future = validate_rainfall_dataframe(
+    actual_future = validate_daily_rainfall_observations(
         actual_future
     )
 
@@ -268,7 +281,7 @@ def get_initial_state(dataframe, decision_date):
     Only observations strictly before the decision date are used.
     """
 
-    dataframe = validate_rainfall_dataframe(dataframe)
+    dataframe = validate_daily_rainfall_observations(dataframe)
 
     decision_date = pd.Timestamp(decision_date)
 
@@ -430,7 +443,7 @@ def calibrate_backtest_monthly_transition_matrix(
 
     import numpy as np
 
-    training_data = validate_rainfall_dataframe(
+    training_data = validate_daily_rainfall_observations(
         training_data
     )
 
@@ -481,7 +494,7 @@ def prepare_month_aware_calibration(
 
     import numpy as np
 
-    training_data = validate_rainfall_dataframe(
+    training_data = validate_daily_rainfall_observations(
         training_data
     )
 
@@ -720,7 +733,7 @@ def generate_month_aware_backtest_scenario(
 
     import numpy as np
 
-    training_data = validate_rainfall_dataframe(
+    training_data = validate_daily_rainfall_observations(
         training_data
     )
 

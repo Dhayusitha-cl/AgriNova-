@@ -107,6 +107,93 @@ def validate_rainfall(dataframe):
     return dataframe
 
 
+def validate_daily_rainfall_observations(dataframe):
+    """
+    Validate a processed daily rainfall observation dataset.
+
+    This validator is intended for datasets used by calibration,
+    backtesting, and rainfall simulation.
+
+    Unlike validate_rainfall(), missing rainfall observations are
+    rejected because calibration requires complete observations.
+
+    Required columns:
+        date
+        rainfall_mm
+        rainfall_state
+    """
+
+    required_columns = {
+        "date",
+        "rainfall_mm",
+        "rainfall_state",
+    }
+
+    missing_columns = required_columns - set(dataframe.columns)
+
+    if missing_columns:
+        raise ValueError(
+            f"Missing required columns: {sorted(missing_columns)}"
+        )
+
+    dataframe = dataframe.copy()
+
+    dataframe["date"] = pd.to_datetime(
+        dataframe["date"],
+        errors="coerce",
+    )
+
+    if dataframe["date"].isna().any():
+        raise ValueError(
+            "Rainfall data contains invalid dates."
+        )
+
+    if dataframe["date"].duplicated().any():
+        raise ValueError(
+            "Rainfall data contains duplicate dates."
+        )
+
+    if dataframe["rainfall_mm"].isna().any():
+        raise ValueError(
+            "Rainfall data contains missing rainfall values."
+        )
+
+    if (dataframe["rainfall_mm"] < 0).any():
+        raise ValueError(
+            "Rainfall data contains negative rainfall values."
+        )
+
+    valid_states = {
+        "dry",
+        "drizzle",
+        "rain",
+    }
+
+    invalid_states = set(
+        dataframe["rainfall_state"]
+    ) - valid_states
+
+    if invalid_states:
+        raise ValueError(
+            "Rainfall data contains invalid rainfall states: "
+            f"{sorted(invalid_states)}"
+        )
+
+    for _, row in dataframe.iterrows():
+        expected_state = classify_rainfall(
+            row["rainfall_mm"]
+        )
+
+        if row["rainfall_state"] != expected_state:
+            raise ValueError(
+                "Rainfall state does not match rainfall amount."
+            )
+
+    return dataframe.sort_values(
+        "date"
+    ).reset_index(drop=True)
+
+
 def classify_rainfall(rainfall_mm):
     """
     Convert rainfall amount into a simple weather state.

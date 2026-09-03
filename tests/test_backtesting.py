@@ -144,6 +144,49 @@ def test_backtest_split_has_no_overlap():
 
     assert training["date"].max() < future["date"].min()
 
+def test_actual_future_rejects_incomplete_horizon():
+    dataframe = make_test_rainfall_data()
+
+    decision_date = "2024-06-20"
+
+    incomplete = dataframe[
+        dataframe["date"]
+        < pd.Timestamp("2024-06-24")
+    ].copy()
+
+    with pytest.raises(ValueError, match="complete"):
+        get_actual_future_data(
+            incomplete,
+            decision_date,
+            horizon_days=5,
+        )
+
+
+def test_actual_future_rejects_incomplete_horizon_due_to_missing_date():
+    dataframe = make_test_rainfall_data()
+
+    decision_date = pd.Timestamp("2024-06-20")
+
+    future = dataframe[
+        dataframe["date"].isin(
+            pd.to_datetime([
+                "2024-06-20",
+                "2024-06-21",
+                "2024-06-23",
+                "2024-06-24",
+            ])
+        )
+    ].copy()
+
+    with pytest.raises(
+        ValueError,
+        match="complete 5-day horizon",
+    ):
+        get_actual_future_data(
+            future,
+            decision_date,
+            horizon_days=5,
+        )
 
 def test_initial_state_uses_previous_observation():
 
@@ -737,3 +780,97 @@ def test_monthly_calibration_does_not_create_transition_across_missing_date():
         july_matrix.sum(axis=1),
         1.0,
     )
+
+def test_validate_rainfall_dataframe_rejects_duplicate_dates():
+    dataframe = pd.DataFrame(
+        {
+            "date": [
+                "2024-06-10",
+                "2024-06-10",
+                "2024-06-11",
+            ],
+            "rainfall_mm": [0.0, 12.0, 5.0],
+            "rainfall_state": [
+                "dry",
+                "rain",
+                "drizzle",
+            ],
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="duplicate dates",
+    ):
+        validate_rainfall_dataframe(dataframe)
+
+def test_validate_rainfall_dataframe_rejects_negative_rainfall():
+    dataframe = pd.DataFrame(
+        {
+            "date": [
+                "2024-06-10",
+                "2024-06-11",
+            ],
+            "rainfall_mm": [
+                10.0,
+                -5.0,
+            ],
+            "rainfall_state": [
+                "rain",
+                "dry",
+            ],
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="negative rainfall",
+    ):
+        validate_rainfall_dataframe(dataframe)
+
+def test_validate_rainfall_dataframe_rejects_missing_rainfall():
+    dataframe = pd.DataFrame(
+        {
+            "date": ["2024-06-10"],
+            "rainfall_mm": [np.nan],
+            "rainfall_state": ["dry"],
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="missing rainfall",
+    ):
+        validate_rainfall_dataframe(dataframe)
+
+
+def test_validate_rainfall_dataframe_rejects_invalid_state():
+    dataframe = pd.DataFrame(
+        {
+            "date": ["2024-06-10"],
+            "rainfall_mm": [5.0],
+            "rainfall_state": ["heavy_rain"],
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="invalid rainfall states",
+    ):
+        validate_rainfall_dataframe(dataframe)
+
+
+def test_validate_rainfall_dataframe_rejects_state_amount_mismatch():
+    dataframe = pd.DataFrame(
+        {
+            "date": ["2024-06-10"],
+            "rainfall_mm": [15.0],
+            "rainfall_state": ["drizzle"],
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="state does not match rainfall amount",
+    ):
+        validate_rainfall_dataframe(dataframe)

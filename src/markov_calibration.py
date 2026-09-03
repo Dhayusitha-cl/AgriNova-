@@ -29,9 +29,12 @@ STATES = ["dry", "drizzle", "rain"]
 
 def count_transitions(dataframe):
     """
-    Count transitions between consecutive rainfall states.
+    Count transitions between consecutive calendar-day rainfall states.
 
-    Missing states are ignored.
+    A transition is counted only when the next observation is exactly
+    one calendar day after the current observation.
+
+    Missing or invalid states are ignored.
 
     Returns
     -------
@@ -43,9 +46,25 @@ def count_transitions(dataframe):
         lambda: {state: 0 for state in STATES}
     )
 
+    dates = pd.to_datetime(
+        dataframe["date"],
+        errors="coerce",
+    ).tolist()
+
     states = dataframe["rainfall_state"].tolist()
 
-    for current_state, next_state in zip(states[:-1], states[1:]):
+    for current_date, next_date, current_state, next_state in zip(
+        dates[:-1],
+        dates[1:],
+        states[:-1],
+        states[1:],
+    ):
+        if pd.isna(current_date) or pd.isna(next_date):
+            continue
+
+        if next_date != current_date + pd.Timedelta(days=1):
+            continue
+
         if current_state not in STATES:
             continue
 

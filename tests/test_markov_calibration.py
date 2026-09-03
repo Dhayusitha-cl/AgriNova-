@@ -115,6 +115,8 @@ def test_validate_rejects_invalid_row_sum():
 
     with pytest.raises(ValueError):
         validate_transition_matrix(invalid_matrix)
+
+
 def test_multi_year_transition_counts():
     from src.markov_calibration import (
         multi_year_transition_counts_dataframe,
@@ -160,6 +162,8 @@ def test_multi_year_transition_matrix_is_valid():
     matrix = calculate_multi_year_transition_matrix()
 
     assert validate_transition_matrix(matrix) is True
+
+
 def test_monthly_transition_matrix_uses_month_specific_data():
     from src.markov_calibration import (
         calculate_monthly_transition_matrices_from_training,
@@ -237,6 +241,8 @@ def test_monthly_transition_matrix_rejects_invalid_month():
             dataframe,
             month=13,
         )
+
+
 def test_monthly_transition_matrix_ignores_nonconsecutive_dates():
     from src.markov_calibration import (
         calculate_monthly_transition_matrices,
@@ -269,6 +275,8 @@ def test_monthly_transition_matrix_ignores_nonconsecutive_dates():
         july_matrix,
         np.zeros((3, 3)),
     )
+
+
 def test_monthly_transition_matrix_counts_consecutive_dates():
     from src.markov_calibration import (
         calculate_monthly_transition_matrices,
@@ -316,3 +324,31 @@ def test_monthly_transition_matrix_counts_consecutive_dates():
         july_matrix[rain],
         [0.0, 0.0, 0.0],
     )
+
+
+def test_count_transitions_ignores_nonconsecutive_dates():
+    dataframe = pd.DataFrame(
+        {
+            "date": pd.to_datetime(
+                [
+                    "2024-06-10",
+                    "2024-06-11",
+                    "2024-06-20",
+                ]
+            ),
+            "rainfall_state": [
+                "dry",
+                "rain",
+                "drizzle",
+            ],
+        }
+    )
+
+    counts = count_transitions(dataframe)
+
+    # June 10 -> June 11 is a valid transition.
+    assert counts["dry"]["rain"] == 1
+
+    # June 11 -> June 20 has a date gap, so it must NOT
+    # be treated as a rainfall-state transition.
+    assert counts.get("rain", {}).get("drizzle", 0) == 0
