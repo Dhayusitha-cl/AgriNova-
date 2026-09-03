@@ -1,9 +1,271 @@
+import pytest
+
+from src.crop_data import crops
 from src.economic_engine import (
     calculate_economic_outcome,
+    calculate_profit,
     compare_all_decisions,
     format_currency,
 )
 
+
+def test_calculate_profit_rejects_nan_probability():
+    with pytest.raises(
+        ValueError,
+        match="success_probability must be a finite number",
+    ):
+        calculate_profit(
+            crop_name="cotton",
+            yield_per_acre=10,
+            price_per_quintal=6500,
+            seed_cost=3400,
+            success_probability=float("nan"),
+        )
+
+
+def test_calculate_profit_rejects_infinite_probability():
+    with pytest.raises(
+        ValueError,
+        match="success_probability must be a finite number",
+    ):
+        calculate_profit(
+            crop_name="cotton",
+            yield_per_acre=10,
+            price_per_quintal=6500,
+            seed_cost=3400,
+            success_probability=float("inf"),
+        )
+
+
+def test_calculate_profit_rejects_negative_infinite_probability():
+    with pytest.raises(
+        ValueError,
+        match="success_probability must be a finite number",
+    ):
+        calculate_profit(
+            crop_name="cotton",
+            yield_per_acre=10,
+            price_per_quintal=6500,
+            seed_cost=3400,
+            success_probability=float("-inf"),
+        )
+
+
+def test_calculate_profit_rejects_negative_probability():
+    with pytest.raises(
+        ValueError,
+        match="success_probability must be between 0 and 1",
+    ):
+        calculate_profit(
+            crop_name="cotton",
+            yield_per_acre=10,
+            price_per_quintal=6500,
+            seed_cost=3400,
+            success_probability=-0.1,
+        )
+
+
+def test_calculate_profit_rejects_probability_above_one():
+    with pytest.raises(
+        ValueError,
+        match="success_probability must be between 0 and 1",
+    ):
+        calculate_profit(
+            crop_name="cotton",
+            yield_per_acre=10,
+            price_per_quintal=6500,
+            seed_cost=3400,
+            success_probability=1.1,
+        )
+
+
+def test_calculate_profit_rejects_nan_yield():
+    with pytest.raises(
+        ValueError,
+        match="yield_per_acre must be a finite number",
+    ):
+        calculate_profit(
+            crop_name="cotton",
+            yield_per_acre=float("nan"),
+            price_per_quintal=6500,
+            seed_cost=3400,
+            success_probability=0.5,
+        )
+
+
+def test_calculate_profit_rejects_infinite_yield():
+    with pytest.raises(
+        ValueError,
+        match="yield_per_acre must be a finite number",
+    ):
+        calculate_profit(
+            crop_name="cotton",
+            yield_per_acre=float("inf"),
+            price_per_quintal=6500,
+            seed_cost=3400,
+            success_probability=0.5,
+        )
+
+
+def test_calculate_profit_rejects_negative_yield():
+    with pytest.raises(
+        ValueError,
+        match="yield_per_acre cannot be negative",
+    ):
+        calculate_profit(
+            crop_name="cotton",
+            yield_per_acre=-1,
+            price_per_quintal=6500,
+            seed_cost=3400,
+            success_probability=0.5,
+        )
+
+
+def test_calculate_profit_rejects_nan_price():
+    with pytest.raises(
+        ValueError,
+        match="price_per_quintal must be a finite number",
+    ):
+        calculate_profit(
+            crop_name="cotton",
+            yield_per_acre=10,
+            price_per_quintal=float("nan"),
+            seed_cost=3400,
+            success_probability=0.5,
+        )
+
+
+def test_calculate_profit_rejects_infinite_price():
+    with pytest.raises(
+        ValueError,
+        match="price_per_quintal must be a finite number",
+    ):
+        calculate_profit(
+            crop_name="cotton",
+            yield_per_acre=10,
+            price_per_quintal=float("inf"),
+            seed_cost=3400,
+            success_probability=0.5,
+        )
+
+
+def test_calculate_profit_rejects_negative_price():
+    with pytest.raises(
+        ValueError,
+        match="price_per_quintal cannot be negative",
+    ):
+        calculate_profit(
+            crop_name="cotton",
+            yield_per_acre=10,
+            price_per_quintal=-1,
+            seed_cost=3400,
+            success_probability=0.5,
+        )
+
+
+def test_calculate_profit_rejects_nan_seed_cost():
+    with pytest.raises(
+        ValueError,
+        match="seed_cost must be a finite number",
+    ):
+        calculate_profit(
+            crop_name="cotton",
+            yield_per_acre=10,
+            price_per_quintal=6500,
+            seed_cost=float("nan"),
+            success_probability=0.5,
+        )
+
+
+def test_calculate_profit_rejects_infinite_seed_cost():
+    with pytest.raises(
+        ValueError,
+        match="seed_cost must be a finite number",
+    ):
+        calculate_profit(
+            crop_name="cotton",
+            yield_per_acre=10,
+            price_per_quintal=6500,
+            seed_cost=float("inf"),
+            success_probability=0.5,
+        )
+
+
+def test_calculate_profit_rejects_negative_seed_cost():
+    with pytest.raises(
+        ValueError,
+        match="seed_cost cannot be negative",
+    ):
+        calculate_profit(
+            crop_name="cotton",
+            yield_per_acre=10,
+            price_per_quintal=6500,
+            seed_cost=-1,
+            success_probability=0.5,
+        )
+
+
+def test_wait_rejects_nan_yield_loss_parameter(monkeypatch):
+    monkeypatch.setitem(
+        crops["cotton"],
+        "yield_loss_per_day_pct",
+        float("nan"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="yield_loss_per_day_pct must be a finite number",
+    ):
+        calculate_economic_outcome(
+            crop_name="cotton",
+            soil_type="medium_black",
+            decision="wait",
+            germination_prob=0.5,
+            rainfall_yesterday_mm=10,
+            current_moisture_mm=100,
+        )
+
+
+def test_wait_rejects_infinite_yield_loss_parameter(monkeypatch):
+    monkeypatch.setitem(
+        crops["cotton"],
+        "yield_loss_per_day_pct",
+        float("inf"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="yield_loss_per_day_pct must be a finite number",
+    ):
+        calculate_economic_outcome(
+            crop_name="cotton",
+            soil_type="medium_black",
+            decision="wait",
+            germination_prob=0.5,
+            rainfall_yesterday_mm=10,
+            current_moisture_mm=100,
+        )
+
+
+def test_wait_rejects_negative_yield_loss_parameter(monkeypatch):
+    monkeypatch.setitem(
+        crops["cotton"],
+        "yield_loss_per_day_pct",
+        -1,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="yield_loss_per_day_pct cannot be negative",
+    ):
+        calculate_economic_outcome(
+            crop_name="cotton",
+            soil_type="medium_black",
+            decision="wait",
+            germination_prob=0.5,
+            rainfall_yesterday_mm=10,
+            current_moisture_mm=100,
+        )
 
 def test_format_currency():
     assert format_currency(45000) == "₹45,000"

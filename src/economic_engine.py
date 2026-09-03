@@ -21,6 +21,8 @@ Important
 - Crop-specific yield-loss parameters are used for the five-day delay.
 """
 
+import math
+
 from src.crop_data import crops
 from src.soil_data import soils
 
@@ -53,6 +55,13 @@ def _validate_inputs(
     if soil_type not in soils:
         raise ValueError(
             f"Unknown soil type: {soil_type}"
+        )
+
+    germination_prob = float(germination_prob)
+
+    if not math.isfinite(germination_prob):
+        raise ValueError(
+            "germination_prob must be a finite number."
         )
 
     if not 0 <= germination_prob <= 1:
@@ -97,15 +106,50 @@ def calculate_profit(
             f"Unknown crop: {crop_name}"
         )
 
+    yield_per_acre = float(yield_per_acre)
+    price_per_quintal = float(price_per_quintal)
+    seed_cost = float(seed_cost)
+    success_probability = float(success_probability)
+
+    if not math.isfinite(success_probability):
+        raise ValueError(
+            "success_probability must be a finite number."
+        )
+
     if not 0 <= success_probability <= 1:
         raise ValueError(
             "success_probability must be between 0 and 1."
         )
 
-    yield_per_acre = float(yield_per_acre)
-    price_per_quintal = float(price_per_quintal)
-    seed_cost = float(seed_cost)
-    success_probability = float(success_probability)
+    if not math.isfinite(yield_per_acre):
+        raise ValueError(
+            "yield_per_acre must be a finite number."
+        )
+
+    if yield_per_acre < 0:
+        raise ValueError(
+            "yield_per_acre cannot be negative."
+        )
+
+    if not math.isfinite(price_per_quintal):
+        raise ValueError(
+            "price_per_quintal must be a finite number."
+        )
+
+    if price_per_quintal < 0:
+        raise ValueError(
+            "price_per_quintal cannot be negative."
+        )
+
+    if not math.isfinite(seed_cost):
+        raise ValueError(
+            "seed_cost must be a finite number."
+        )
+
+    if seed_cost < 0:
+        raise ValueError(
+            "seed_cost cannot be negative."
+        )
 
     profit_if_success = (
         yield_per_acre
@@ -220,6 +264,16 @@ def _calculate_wait(
     daily_yield_loss_pct = float(
         crop["yield_loss_per_day_pct"]
     )
+
+    if not math.isfinite(daily_yield_loss_pct):
+        raise ValueError(
+            "yield_loss_per_day_pct must be a finite number."
+        )
+
+    if daily_yield_loss_pct < 0:
+        raise ValueError(
+            "yield_loss_per_day_pct cannot be negative."
+        )
 
     total_delay_loss_pct = (
         daily_yield_loss_pct * WAIT_DAYS
