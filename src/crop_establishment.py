@@ -16,6 +16,8 @@ Important:
     Establishment results are simulation outputs, not guarantees.
 """
 
+import math
+
 from src.crop_data import crops
 from src.soil_data import soils
 
@@ -58,6 +60,16 @@ def calculate_moisture_percentage(
         soils[soil_type]["field_capacity_mm"]
     )
 
+    if not math.isfinite(soil_water_mm):
+        raise ValueError(
+            "soil_water_mm must be a finite number."
+        )
+
+    if not math.isfinite(field_capacity_mm):
+        raise ValueError(
+            "field_capacity_mm must be a finite number."
+        )
+
     if soil_water_mm < 0:
         raise ValueError(
             "soil_water_mm cannot be negative."
@@ -84,6 +96,12 @@ def evaluate_establishment(
     Establishment succeeds when the soil moisture percentage is
     at or above the crop's minimum moisture requirement on every
     day of the crop's germination period.
+
+    Modelling assumption:
+        The current simplified model requires the moisture
+        threshold to be met on every germination day. This is
+        an explicit modelling assumption and is not a claim that
+        all crops biologically require this exact threshold rule.
 
     Parameters
     ----------
@@ -119,6 +137,26 @@ def evaluate_establishment(
     minimum_moisture_pct = float(
         crop_parameters["min_moisture_pct"]
     )
+
+    if germination_days <= 0:
+        raise ValueError(
+            "germination_days must be greater than zero."
+        )
+
+    if not math.isfinite(minimum_moisture_pct):
+        raise ValueError(
+            "min_moisture_pct must be a finite number."
+        )
+
+    if minimum_moisture_pct < 0:
+        raise ValueError(
+            "min_moisture_pct cannot be negative."
+        )
+
+    if minimum_moisture_pct > 100:
+        raise ValueError(
+            "min_moisture_pct cannot exceed 100."
+        )
 
     if len(soil_water_results) < germination_days:
         raise ValueError(

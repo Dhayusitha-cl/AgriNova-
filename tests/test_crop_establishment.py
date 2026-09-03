@@ -1,3 +1,6 @@
+import pytest
+
+from src.crop_data import crops
 from src.crop_establishment import (
     calculate_moisture_percentage,
     evaluate_establishment,
@@ -176,3 +179,53 @@ def test_unknown_soil_is_rejected():
         assert False
     except ValueError:
         assert True
+
+
+def test_calculate_moisture_percentage_rejects_nan():
+    with pytest.raises(
+        ValueError,
+        match="soil_water_mm must be a finite number",
+    ):
+        calculate_moisture_percentage(
+            float("nan"),
+            "medium_black",
+        )
+
+
+def test_calculate_moisture_percentage_rejects_infinite():
+    with pytest.raises(
+        ValueError,
+        match="soil_water_mm must be a finite number",
+    ):
+        calculate_moisture_percentage(
+            float("inf"),
+            "medium_black",
+        )
+
+
+def test_calculate_moisture_percentage_rejects_negative_infinite():
+    with pytest.raises(
+        ValueError,
+        match="soil_water_mm must be a finite number",
+    ):
+        calculate_moisture_percentage(
+            float("-inf"),
+            "medium_black",
+        )
+
+def test_establishment_rejects_invalid_germination_days(monkeypatch):
+    monkeypatch.setitem(
+        crops["cotton"],
+        "germination_days",
+        0,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="germination_days must be greater than zero",
+    ):
+        evaluate_establishment(
+            [{"day": 1, "final_water_mm": 30}],
+            "cotton",
+            "medium_black",
+        )
