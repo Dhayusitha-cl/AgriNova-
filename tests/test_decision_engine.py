@@ -5,6 +5,7 @@ from src.decision_engine import (
     calculate_daily_et,
     _get_initial_state,
     _calculate_confidence,
+    _safe_wait_trajectories,
     _scenario_establishment_probability,
     make_decision,
 )
@@ -587,4 +588,48 @@ def test_invalid_initial_state_is_rejected():
             num_simulations=10,
             days_to_simulate=7,
             initial_state="invalid",
+        )
+
+
+def test_scenario_establishment_probability_rejects_short_scenario():
+    scenarios = [
+        [
+            {"rainfall_mm": 10.0, "state": "rain"}
+            for _ in range(7)
+        ]
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="Scenario is shorter than the crop germination period",
+    ):
+        _scenario_establishment_probability(
+            scenarios=scenarios,
+            crop_name="cotton",
+            soil_type="medium_black",
+            initial_moisture_mm=30.0,
+        )
+
+
+def test_safe_wait_trajectories_rejects_short_scenario():
+    wait_scenarios = [
+        [
+            {"rainfall_mm": 10.0, "state": "rain"}
+            for _ in range(12)
+        ]
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "WAIT scenario is shorter than the required "
+            "wait plus crop germination period"
+        ),
+    ):
+        _safe_wait_trajectories(
+            wait_scenarios=wait_scenarios,
+            wait_days=5,
+            crop_name="cotton",
+            soil_type="medium_black",
+            current_moisture_mm=30.0,
         )

@@ -23,7 +23,7 @@ from .monte_carlo_weather import (
 from .soil_water import simulate_soil_water
 from .crop_establishment import evaluate_establishment
 from .economic_engine import compare_all_decisions
-
+from src.rainfall_preprocessing import classify_rainfall
 
 def _validate_inputs(
     crop_name,
@@ -197,16 +197,11 @@ def _scenario_establishment_probability(
 
     for scenario in scenarios:
 
-        # Protect against an accidentally short scenario.
         scenario = list(scenario)
 
         if len(scenario) < crop_germination_days:
-            scenario.extend(
-                [{"rainfall_mm": 0.0}]
-                * (
-                    crop_germination_days
-                    - len(scenario)
-                )
+            raise ValueError(
+                "Scenario is shorter than the crop germination period."
             )
 
         soil_water_results = simulate_rainfall_soil_water(
@@ -245,10 +240,6 @@ def _scenario_establishment_probability(
             dtype=float,
         ),
     )
-
-
-from src.rainfall_preprocessing import classify_rainfall
-
 
 def _get_initial_state(rainfall_yesterday_mm):
     """
@@ -323,6 +314,10 @@ def _safe_wait_trajectories(
     is evaluated only after the waiting period.
 
     Always returns one trajectory per Monte Carlo simulation.
+
+    A WAIT scenario must contain enough days for both the
+    waiting period and the crop establishment period. The
+    function does not fabricate missing days with zero rainfall.
     """
 
     wait_trajectories = []
@@ -333,8 +328,17 @@ def _safe_wait_trajectories(
     )
 
     for scenario in wait_scenarios:
-
         scenario = list(scenario)
+
+        required_days = (
+            wait_days + crop_germination_days
+        )
+
+        if len(scenario) < required_days:
+            raise ValueError(
+                "WAIT scenario is shorter than the required "
+                "wait plus crop germination period."
+            )
 
         # -----------------------------------------------------
         # WAIT PERIOD
@@ -362,18 +366,6 @@ def _safe_wait_trajectories(
         # -----------------------------------------------------
 
         future_scenario = scenario[wait_days:]
-
-        if len(future_scenario) < crop_germination_days:
-            future_scenario = list(
-                future_scenario
-            )
-
-            while len(future_scenario) < crop_germination_days:
-                future_scenario.append(
-                    {
-                        "rainfall_mm": 0.0
-                    }
-                )
 
         future_results = simulate_rainfall_soil_water(
             rainfall_scenario=future_scenario,
