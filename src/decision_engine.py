@@ -469,6 +469,19 @@ def make_decision(
         days_to_simulate=days_to_simulate,
     )
 
+    if initial_state is not None:
+        valid_states = {
+            "dry",
+            "drizzle",
+            "rain",
+        }
+
+        if initial_state not in valid_states:
+            raise ValueError(
+                "initial_state must be one of: "
+                "'dry', 'drizzle', 'rain'."
+            )
+
     # =========================================================
     # INITIAL WEATHER STATE
     # =========================================================

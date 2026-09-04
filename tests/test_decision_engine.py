@@ -571,3 +571,20 @@ def test_non_integer_days_are_rejected():
             num_simulations=20,
             days_to_simulate=14.5,
         )
+
+
+def test_invalid_initial_state_is_rejected():
+    with pytest.raises(
+        ValueError,
+        match="initial_state must be one of",
+    ):
+        make_decision(
+            crop_name="cotton",
+            soil_type="sandy_loam",
+            current_moisture_mm=18.0,
+            rainfall_yesterday_mm=5.0,
+            transition_matrix=VALID_MATRIX,
+            num_simulations=10,
+            days_to_simulate=7,
+            initial_state="invalid",
+        )
