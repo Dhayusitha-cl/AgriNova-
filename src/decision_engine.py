@@ -23,7 +23,7 @@ from .monte_carlo_weather import (
 from .soil_water import simulate_soil_water
 from .crop_establishment import evaluate_establishment
 from .economic_engine import compare_all_decisions
-from src.rainfall_preprocessing import classify_rainfall
+from .rainfall_preprocessing import classify_rainfall
 
 def _validate_inputs(
     crop_name,
@@ -512,7 +512,7 @@ def make_decision(
             num_simulations=num_simulations,
             initial_state=initial_state,
             random_seed=random_seed,
-	    rainfall_data=rainfall_data,
+            rainfall_data=rainfall_data,
         )
     else:
         if transition_matrix is None:
@@ -525,7 +525,7 @@ def make_decision(
             num_days=simulation_days,
             num_simulations=num_simulations,
             initial_state=initial_state,
-	    rainfall_data=rainfall_data,
+            rainfall_data=rainfall_data,
             random_seed=random_seed,
         )
 
@@ -574,7 +574,7 @@ def make_decision(
             num_simulations=num_simulations,
             initial_state=initial_state,
             random_seed=random_seed + 1,
-	    rainfall_data=rainfall_data,
+            rainfall_data=rainfall_data,
         )
 
     germ_prob_wait, wait_trajectories = (
