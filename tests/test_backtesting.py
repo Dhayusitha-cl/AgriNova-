@@ -307,6 +307,60 @@ def test_backtest_transition_calibration_uses_training_data():
         matrix.sum(axis=1),
         1.0,
     )
+
+def test_backtest_calibration_ignores_future_observations():
+
+    dataframe = make_test_rainfall_data()
+
+    decision_date = "2024-06-20"
+
+    baseline_training = get_training_data(
+        dataframe,
+        decision_date,
+    )
+
+    baseline_matrix = np.asarray(
+        calibrate_backtest_transition_matrix(
+            baseline_training
+        ),
+        dtype=float,
+    )
+
+    modified_dataframe = dataframe.copy()
+
+    future_mask = (
+        modified_dataframe["date"]
+        >= pd.Timestamp(decision_date)
+    )
+
+    modified_dataframe.loc[
+        future_mask,
+        "rainfall_mm",
+    ] = 999.0
+
+    modified_dataframe.loc[
+        future_mask,
+        "rainfall_state",
+    ] = "rain"
+
+    modified_training = get_training_data(
+        modified_dataframe,
+        decision_date,
+    )
+
+    modified_matrix = np.asarray(
+        calibrate_backtest_transition_matrix(
+            modified_training
+        ),
+        dtype=float,
+    )
+
+    assert np.allclose(
+        baseline_matrix,
+        modified_matrix,
+    )
+
+
 def test_run_single_backtest():
 
     from src.backtesting import run_single_backtest
