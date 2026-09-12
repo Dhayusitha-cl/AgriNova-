@@ -98,10 +98,28 @@ def print_summary(results):
     print()
     print("-" * 72)
 
-    if "absolute_error_mm" in results.columns:
+
+    if {
+        "actual_total_mm",
+        "simulated_mean_mm",
+    }.issubset(results.columns):
+        errors = (
+            results["simulated_mean_mm"]
+            - results["actual_total_mm"]
+        )
+
+        mae = errors.abs().mean()
+        rmse = (errors.pow(2).mean()) ** 0.5
+        bias = errors.mean()
+
         print(
-            "Mean absolute rainfall error : "
-            f"{results['absolute_error_mm'].mean():.2f} mm"
+            f"Mean absolute error (MAE)    : {mae:.2f} mm"
+        )
+        print(
+            f"Root mean square error       : {rmse:.2f} mm"
+        )
+        print(
+            f"Mean signed error (bias)     : {bias:.2f} mm"
         )
 
     if "inside_p10_p90" in results.columns:
@@ -131,6 +149,7 @@ def print_summary(results):
     print(
         "Simulation probabilities are estimates, not guarantees."
     )
+
 
 
 def main():
