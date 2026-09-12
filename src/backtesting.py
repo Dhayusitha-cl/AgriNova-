@@ -411,69 +411,6 @@ def run_multi_date_backtest(
         results.append(result)
 
     return pd.DataFrame(results)
-def calibrate_backtest_monthly_transition_matrix(
-    training_data,
-    decision_date,
-):
-    """
-    Calibrate a month-specific Markov transition matrix
-    using only training observations available before the
-    historical decision date.
-
-    This prevents future-data leakage.
-
-    Parameters
-    ----------
-    training_data : pandas.DataFrame
-        Historical observations strictly before the decision date.
-
-    decision_date : str or pandas.Timestamp
-        Historical decision date.
-
-    Returns
-    -------
-    numpy.ndarray
-        3x3 transition matrix for the decision month.
-
-    Notes
-    -----
-    If insufficient observations exist for the decision month,
-    the function falls back to the full training-data matrix.
-    """
-
-    import numpy as np
-
-    training_data = validate_daily_rainfall_observations(
-        training_data
-    )
-
-    decision_date = pd.Timestamp(decision_date)
-
-    month = decision_date.month
-
-    monthly_training_data = training_data[
-        training_data["date"].dt.month == month
-    ].copy()
-
-    # Use the normal training-data matrix if the
-    # month-specific dataset is too small.
-    if len(monthly_training_data) < 30:
-        return calibrate_backtest_transition_matrix(
-            training_data
-        )
-
-    matrix = calculate_transition_matrix(
-        monthly_training_data
-    )
-
-    matrix = np.asarray(
-        matrix,
-        dtype=float,
-    )
-
-    return matrix
-
-
 def prepare_month_aware_calibration(
     training_data,
 ):
