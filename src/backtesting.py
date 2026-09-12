@@ -558,10 +558,13 @@ def prepare_month_aware_calibration(
             training_data["date"].dt.month == month
         ].copy()
 
-        monthly_transition_data = []
+        monthly_transition_counts = np.zeros(
+            (len(valid_states), len(valid_states)),
+            dtype=float,
+        )
 
-        # Group by year first so that we never create a transition
-        # between July 31 of one year and July 1 of another year.
+        # Group by year so that transitions never cross
+        # calendar-year boundaries.
         for year, year_data in monthly_training.groupby(
             monthly_training["date"].dt.year
         ):
@@ -575,79 +578,105 @@ def prepare_month_aware_calibration(
             if len(year_data) < 2:
                 continue
 
-            date_difference = (
-                year_data["date"].diff().dt.days
+            previous_rows = year_data.iloc[:-1].reset_index(
+                drop=True
             )
 
-            # Keep only genuinely consecutive observations.
-            consecutive_data = year_data[
-                date_difference.eq(1)
-                | date_difference.isna()
-            ].copy()
+            next_rows = year_data.iloc[1:].reset_index(
+                drop=True
+            )
 
-            if len(consecutive_data) >= 2:
-                monthly_transition_data.append(
-                    consecutive_data
+            date_difference = (
+                next_rows["date"]
+                - previous_rows["date"]
+            ).dt.days
+
+            # Only count transitions where the two observations
+            # are exactly one day apart.
+            for index in np.where(
+                date_difference.to_numpy() == 1
+            )[0]:
+
+                previous_state = (
+                    previous_rows.loc[
+                        index,
+                        "rainfall_state",
+                    ]
                 )
 
-        if monthly_transition_data:
+                next_state = (
+                    next_rows.loc[
+                        index,
+                        "rainfall_state",
+                    ]
+                )
 
-            monthly_training_for_transitions = pd.concat(
-                monthly_transition_data,
-                ignore_index=True,
-            )
+                previous_index = valid_states.index(
+                    previous_state
+                )
 
-        else:
+                next_index = valid_states.index(
+                    next_state
+                )
 
-            monthly_training_for_transitions = (
-                pd.DataFrame()
-            )
+                monthly_transition_counts[
+                    previous_index,
+                    next_index,
+                ] += 1
 
-        # Full training matrix is always the safe fallback.
         transition_matrix = (
             full_transition_matrix.copy()
         )
 
-        # Use month-specific transitions only when there are
-        # sufficient consecutive observations.
-        if len(monthly_training_for_transitions) >= 30:
+        # Use month-specific transitions only when there
+        # are sufficient valid consecutive transitions.
+        total_monthly_transitions = (
+            monthly_transition_counts.sum()
+        )
 
-            monthly_counts = (
-                transition_counts_dataframe(
-                    monthly_training_for_transitions
-                ).to_numpy(dtype=float)
-            )
+        if total_monthly_transitions >= 30:
 
             monthly_matrix = np.zeros_like(
-                monthly_counts,
+                monthly_transition_counts,
                 dtype=float,
             )
 
-            for row_index in range(len(valid_states)):
+            for row_index in range(
+                len(valid_states)
+            ):
 
-                row_total = monthly_counts[
-                    row_index
-                ].sum()
+                row_total = (
+                    monthly_transition_counts[
+                        row_index
+                    ].sum()
+                )
 
                 if row_total > 0:
 
-                    monthly_matrix[row_index] = (
-                        monthly_counts[row_index]
+                    monthly_matrix[
+                        row_index
+                    ] = (
+                        monthly_transition_counts[
+                            row_index
+                        ]
                         / row_total
                     )
 
                 else:
 
-                    # If this state has no outgoing transition
-                    # in the month-specific data, retain the
-                    # corresponding full-training fallback row.
-                    monthly_matrix[row_index] = (
+                    # No valid monthly transition was observed
+                    # for this state, so retain the full-training
+                    # fallback row.
+                    monthly_matrix[
+                        row_index
+                    ] = (
                         full_transition_matrix[
                             row_index
                         ]
                     )
 
             transition_matrix = monthly_matrix
+
 
         # -----------------------------------------------------
         # Rainfall amount distributions by state.
