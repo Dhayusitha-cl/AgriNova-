@@ -8,6 +8,51 @@ from validation.baseline_comparison import (
 )
 
 
+def test_estimate_initial_moisture_ignores_future_rainfall():
+    data = load_data()
+
+    decision_date = pd.Timestamp("2024-06-15")
+
+    baseline = estimate_initial_moisture(
+        data=data,
+        decision_date=decision_date,
+        soil_type="medium_black",
+    )
+
+    modified = data.copy()
+
+    future_mask = (
+        modified["date"] >= decision_date
+    )
+
+    modified.loc[
+        future_mask,
+        "rainfall_mm",
+    ] = 999.0
+
+    result = estimate_initial_moisture(
+        data=modified,
+        decision_date=decision_date,
+        soil_type="medium_black",
+    )
+
+    assert result == baseline
+
+
+def test_estimate_initial_moisture_uses_pre_decision_window():
+    data = load_data()
+
+    decision_date = pd.Timestamp("2024-06-15")
+
+    result = estimate_initial_moisture(
+        data=data,
+        decision_date=decision_date,
+        soil_type="medium_black",
+    )
+
+    assert 0.0 <= result <= 60.0
+
+
 def test_realized_establishment_uses_held_out_rainfall():
     data = load_data()
 
@@ -22,7 +67,9 @@ def test_realized_establishment_uses_held_out_rainfall():
     )
 
     initial_moisture = estimate_initial_moisture(
-        "medium_black"
+        data=data,
+        decision_date=decision_date,
+        soil_type="medium_black",
     )
 
     result = calculate_realized_establishment(
@@ -49,7 +96,9 @@ def test_realized_outcome_wait_uses_future_only_for_evaluation():
     )
 
     initial_moisture = estimate_initial_moisture(
-        "medium_black"
+        data=data,
+        decision_date=decision_date,
+        soil_type="medium_black",
     )
 
     result = calculate_realized_outcome(

@@ -43,6 +43,7 @@ from src.decision_engine import (
     evaluate_establishment,
 )
 from src.soil_data import soils
+from src.soil_water import simulate_soil_water
 
 
 # ---------------------------------------------------------------------
@@ -73,6 +74,8 @@ HORIZON = 14
 NUM_SIMULATIONS = 1000
 
 INITIAL_MOISTURE_FRACTION = 0.50
+SOIL_RECONSTRUCTION_DAYS = 30
+DAILY_ET_MM = 5.0
 
 # Simple baseline thresholds.
 #
@@ -106,17 +109,99 @@ def load_data():
     )
 
 
-def estimate_initial_moisture(soil_type):
+def estimate_initial_moisture(
+    data,
+    decision_date,
+    soil_type,
+):
     """
-    Use the documented model default because historical
-    field-moisture observations are unavailable.
+    Reconstruct pre-decision soil moisture using only
+    rainfall observations available before the decision date.
+
+    The reconstruction:
+        - uses the preceding 30 calendar days,
+        - starts at 50% of field capacity,
+        - applies the project's existing 5 mm/day ET assumption,
+        - reuses the canonical soil-water balance model.
+
+    This is model-reconstructed soil moisture, not an observed
+    historical field measurement.
+
+    Raises
+    ------
+    ValueError
+        If the required historical observations are unavailable
+        or are not consecutive calendar days.
     """
+
+    decision_timestamp = pd.Timestamp(
+        decision_date
+    )
+
+    historical = (
+        data.loc[
+            data["date"] < decision_timestamp
+        ]
+        .sort_values("date")
+        .copy()
+    )
+
+    if len(historical) < SOIL_RECONSTRUCTION_DAYS:
+        raise ValueError(
+            "Insufficient historical rainfall observations "
+            "for soil-moisture reconstruction."
+        )
+
+    reconstruction = historical.tail(
+        SOIL_RECONSTRUCTION_DAYS
+    )
+
+    expected_dates = pd.date_range(
+        end=decision_timestamp - pd.Timedelta(days=1),
+        periods=SOIL_RECONSTRUCTION_DAYS,
+        freq="D",
+    )
+
+    actual_dates = pd.DatetimeIndex(
+        reconstruction["date"]
+    )
+
+    if not actual_dates.equals(expected_dates):
+        raise ValueError(
+            "Historical rainfall observations are not "
+            "consecutive for soil-moisture reconstruction."
+        )
 
     field_capacity = float(
         soils[soil_type]["field_capacity_mm"]
     )
 
-    return field_capacity * INITIAL_MOISTURE_FRACTION
+    initial_water = (
+        field_capacity
+        * INITIAL_MOISTURE_FRACTION
+    )
+
+    rainfall_series = (
+        reconstruction["rainfall_mm"]
+        .astype(float)
+        .tolist()
+    )
+
+    et_series = [
+        DAILY_ET_MM
+        for _ in rainfall_series
+    ]
+
+    results = simulate_soil_water(
+        rainfall_series=rainfall_series,
+        et_series=et_series,
+        soil_type=soil_type,
+        initial_water_mm=initial_water,
+    )
+
+    return float(
+        results[-1]["final_water_mm"]
+    )
 
 
 # ---------------------------------------------------------------------
@@ -433,7 +518,9 @@ def run_single_date(
     )
 
     initial_moisture = estimate_initial_moisture(
-        SOIL_TYPE
+        data=data,
+        decision_date=decision_timestamp,
+        soil_type=SOIL_TYPE,
     )
 
     # -------------------------------------------------------------
