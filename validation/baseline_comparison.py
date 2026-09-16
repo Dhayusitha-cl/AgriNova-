@@ -1,6 +1,5 @@
-
 """
-Baseline comparison for CropLogic-Saathi.
+Baseline comparison and decision-quality validation for CropLogic-Saathi.
 
 Compares three pre-sowing decision approaches on the same
 historical decision dates:
@@ -9,20 +8,59 @@ historical decision dates:
 2. Simple rule-based baseline
 3. CropLogic-Saathi probabilistic decision engine
 
-Leakage protection:
-- Only observations strictly before the decision date are
-  supplied to the decision-making methods.
-- The following 14 days are held out and used only for
-  evaluation.
-- Actual future rainfall is never used to make the decision.
+Decision-quality evaluation additionally evaluates all three
+possible actions on the held-out future:
 
-Important:
-- This is historical backtesting evidence.
-- It is not field validation.
-- The outcome evaluator is a simplified proxy based on
-  held-out rainfall and documented crop parameters.
-- It does not prove causal impact or guarantee future
-  decisions.
+    - SOW TODAY
+    - WAIT 5 DAYS
+    - SWITCH TO SOYBEAN
+
+Leakage protection
+------------------
+- Only observations strictly before the decision date are supplied
+  to the decision-making methods.
+- The held-out evaluation period is the 14 calendar days AFTER the
+  decision date.
+- Future rainfall is never used to make a decision.
+- Future rainfall is inspected only after the decision has already
+  been generated.
+- Backtest-date eligibility does not depend on whether the future
+  rainfall produced a successful outcome.
+
+Sowing-window handling
+----------------------
+The primary benchmark uses the documented optimal sowing window for
+the target crop in src/crop_data.py.
+
+For cotton this is:
+
+    June 15 - July 15
+
+The optimal window is treated as a validation-date eligibility
+window, not as a hard biological failure cutoff.
+
+This script does NOT invent a "minimum remaining days" constraint.
+
+Outcome limitations
+-------------------
+The realized outcome evaluator uses the project's existing simplified
+soil-water and crop-establishment models.
+
+It is therefore:
+
+    historical model-based evaluation
+
+and NOT:
+
+    field-measured crop establishment,
+    causal impact evidence,
+    economic ground truth,
+    or a guarantee of future performance.
+
+The current realized outcome is binary (0/1), so realized regret is
+also binary. Ties between actions are common and can make the
+best-action-rate metric appear stronger than the underlying
+decision discrimination actually is.
 """
 
 import sys
@@ -30,17 +68,19 @@ from pathlib import Path
 
 import pandas as pd
 
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+
 import src.backtesting as b
 from src.crop_data import crops
 from src.decision_engine import (
+    evaluate_establishment,
     make_decision,
     simulate_rainfall_soil_water,
-    evaluate_establishment,
 )
 from src.soil_data import soils
 from src.soil_water import simulate_soil_water
@@ -52,19 +92,6 @@ from src.soil_water import simulate_soil_water
 
 DATA_YEARS = range(2019, 2025)
 
-BACKTEST_DATES = [
-    "2020-06-15",
-    "2020-07-01",
-    "2021-06-15",
-    "2021-07-01",
-    "2022-06-15",
-    "2022-07-01",
-    "2023-06-15",
-    "2023-07-01",
-    "2024-06-15",
-    "2024-07-01",
-]
-
 CROP = "cotton"
 SWITCH_CROP = "soybean"
 
@@ -72,18 +99,121 @@ SOIL_TYPE = "medium_black"
 
 HORIZON = 14
 NUM_SIMULATIONS = 1000
+RANDOM_SEED = 42
 
+# Historical decision dates are sampled every N days inside the
+# target crop's documented optimal sowing window.
+BACKTEST_INTERVAL_DAYS = 7
+
+# Soil reconstruction assumptions.
+#
+# These are modelling assumptions, not observed historical field
+# measurements.
 INITIAL_MOISTURE_FRACTION = 0.50
 SOIL_RECONSTRUCTION_DAYS = 30
 DAILY_ET_MM = 5.0
 
+# Minimum amount of pre-decision history required before attempting
+# a backtest.
+MIN_TRAINING_DAYS = 30
+
 # Simple baseline thresholds.
 #
-# These are intentionally fixed before evaluation and are not
-# tuned using the held-out future observations.
+# These are fixed before evaluation and are not tuned using held-out
+# future rainfall.
 RECENT_RAINFALL_DAYS = 3
 SOW_RAINFALL_THRESHOLD_MM = 15.0
 SWITCH_RAINFALL_THRESHOLD_MM = 5.0
+
+ACTIONS = [
+    "SOW TODAY",
+    "WAIT 5 DAYS",
+    "SWITCH TO SOYBEAN",
+]
+
+
+# ---------------------------------------------------------------------
+# SOWING-WINDOW HELPERS
+# ---------------------------------------------------------------------
+
+def parse_sowing_window(window_text):
+    """
+    Parse an optimal sowing window from crop_data.py.
+
+    Expected format:
+
+        "June 15 - July 15"
+
+    Returns
+    -------
+    tuple
+        (start_month, start_day, end_month, end_day)
+
+    Raises
+    ------
+    ValueError
+        If the configured window cannot be parsed.
+    """
+
+    if not isinstance(window_text, str):
+        raise ValueError(
+            "Crop optimal_sowing_window must be a string."
+        )
+
+    parts = [
+        part.strip()
+        for part in window_text.split("-")
+    ]
+
+    if len(parts) != 2:
+        raise ValueError(
+            f"Invalid sowing window format: {window_text!r}"
+        )
+
+    start_text, end_text = parts
+
+    try:
+        start = pd.to_datetime(
+            start_text,
+            format="%B %d",
+        )
+
+        end = pd.to_datetime(
+            end_text,
+            format="%B %d",
+        )
+    except ValueError as exc:
+        raise ValueError(
+            f"Unable to parse sowing window: "
+            f"{window_text!r}"
+        ) from exc
+
+    return (
+        int(start.month),
+        int(start.day),
+        int(end.month),
+        int(end.day),
+    )
+
+
+def get_crop_sowing_window(crop_name):
+    """
+    Return the documented optimal sowing window for a crop.
+
+    The window comes directly from src/crop_data.py.
+
+    This function does not interpret the window as a hard agronomic
+    cutoff.
+    """
+
+    if crop_name not in crops:
+        raise ValueError(
+            f"Unknown crop: {crop_name}"
+        )
+
+    return parse_sowing_window(
+        crops[crop_name]["optimal_sowing_window"]
+    )
 
 
 # ---------------------------------------------------------------------
@@ -91,23 +221,203 @@ SWITCH_RAINFALL_THRESHOLD_MM = 5.0
 # ---------------------------------------------------------------------
 
 def load_data():
-    """Load processed Yavatmal rainfall data."""
+    """Load and combine processed Yavatmal rainfall data."""
 
     frames = []
 
     for year in DATA_YEARS:
-        frame = pd.read_csv(
-            f"data/processed/rainfall_yavatmal_{year}.csv"
+        path = (
+            PROJECT_ROOT
+            / "data"
+            / "processed"
+            / f"rainfall_yavatmal_{year}.csv"
         )
-        frame["date"] = pd.to_datetime(frame["date"])
+
+        frame = pd.read_csv(path)
+
+        if "date" not in frame.columns:
+            raise ValueError(
+                f"Missing 'date' column in {path}."
+            )
+
+        if "rainfall_mm" not in frame.columns:
+            raise ValueError(
+                f"Missing 'rainfall_mm' column in {path}."
+            )
+
+        frame["date"] = pd.to_datetime(
+            frame["date"],
+            errors="raise",
+        ).dt.normalize()
+
         frames.append(frame)
 
-    return (
-        pd.concat(frames, ignore_index=True)
+    if not frames:
+        raise ValueError(
+            "No rainfall datasets were loaded."
+        )
+
+    data = (
+        pd.concat(
+            frames,
+            ignore_index=True,
+        )
         .sort_values("date")
+        .drop_duplicates(
+            subset=["date"],
+            keep="first",
+        )
         .reset_index(drop=True)
     )
 
+    return data
+
+
+# ---------------------------------------------------------------------
+# BACKTEST-DATE GENERATION
+# ---------------------------------------------------------------------
+
+def generate_backtest_dates(data):
+    """
+    Generate deterministic historical decision dates.
+
+    Eligibility requires:
+
+        1. date is inside the target crop's documented optimal
+           sowing window,
+        2. decision date exists in the dataset,
+        3. sufficient pre-decision observations exist,
+        4. Markov calibration succeeds using only pre-decision data,
+        5. the complete 14-day post-decision evaluation window exists.
+
+    Critically, future rainfall amounts are NOT inspected to decide
+    whether a date is eligible.
+
+    The future window is:
+
+        decision_date + 1 day
+        through
+        decision_date + HORIZON days
+
+    The optimal sowing window is used only to define the primary
+    validation population. It is not treated as a hard biological
+    cutoff.
+    """
+
+    (
+        start_month,
+        start_day,
+        end_month,
+        end_day,
+    ) = get_crop_sowing_window(CROP)
+
+    normalized_dates = (
+        pd.to_datetime(data["date"])
+        .dt.normalize()
+    )
+
+    available_dates = set(normalized_dates)
+
+    dates = []
+
+    for year in sorted(DATA_YEARS):
+
+        start = pd.Timestamp(
+            year=year,
+            month=start_month,
+            day=start_day,
+        )
+
+        end = pd.Timestamp(
+            year=year,
+            month=end_month,
+            day=end_day,
+        )
+
+        candidate = start
+
+        while candidate <= end:
+
+            # ---------------------------------------------------------
+            # DECISION DATE MUST EXIST
+            # ---------------------------------------------------------
+
+            if candidate not in available_dates:
+                candidate += pd.Timedelta(
+                    days=BACKTEST_INTERVAL_DAYS
+                )
+                continue
+
+            # ---------------------------------------------------------
+            # TRAINING DATA MUST EXIST
+            #
+            # Only observations strictly before the decision date
+            # are allowed.
+            # ---------------------------------------------------------
+
+            training = data.loc[
+                data["date"] < candidate
+            ].copy()
+
+            if len(training) < MIN_TRAINING_DAYS:
+                candidate += pd.Timedelta(
+                    days=BACKTEST_INTERVAL_DAYS
+                )
+                continue
+
+            # ---------------------------------------------------------
+            # MARKOV CALIBRATION MUST BE POSSIBLE
+            #
+            # Calibration sees training data only.
+            # ---------------------------------------------------------
+
+            try:
+                b.calibrate_backtest_transition_matrix(
+                    training
+                )
+            except ValueError:
+                candidate += pd.Timedelta(
+                    days=BACKTEST_INTERVAL_DAYS
+                )
+                continue
+
+            # ---------------------------------------------------------
+            # REQUIRE COMPLETE POST-DECISION EVALUATION WINDOW
+            #
+            # IMPORTANT:
+            # The decision date itself is NOT part of the future
+            # evaluation window.
+            # ---------------------------------------------------------
+
+            future_dates = pd.date_range(
+                start=candidate + pd.Timedelta(days=1),
+                periods=HORIZON,
+                freq="D",
+            )
+
+            if not all(
+                date in available_dates
+                for date in future_dates
+            ):
+                candidate += pd.Timedelta(
+                    days=BACKTEST_INTERVAL_DAYS
+                )
+                continue
+
+            dates.append(
+                candidate.strftime("%Y-%m-%d")
+            )
+
+            candidate += pd.Timedelta(
+                days=BACKTEST_INTERVAL_DAYS
+            )
+
+    return dates
+
+
+# ---------------------------------------------------------------------
+# SOIL MOISTURE
+# ---------------------------------------------------------------------
 
 def estimate_initial_moisture(
     data,
@@ -115,28 +425,25 @@ def estimate_initial_moisture(
     soil_type,
 ):
     """
-    Reconstruct pre-decision soil moisture using only
-    rainfall observations available before the decision date.
+    Reconstruct pre-decision soil moisture.
 
-    The reconstruction:
-        - uses the preceding 30 calendar days,
-        - starts at 50% of field capacity,
-        - applies the project's existing 5 mm/day ET assumption,
-        - reuses the canonical soil-water balance model.
+    Only rainfall observations strictly before the decision date
+    are used.
 
-    This is model-reconstructed soil moisture, not an observed
-    historical field measurement.
+    Reconstruction:
 
-    Raises
-    ------
-    ValueError
-        If the required historical observations are unavailable
-        or are not consecutive calendar days.
+        - preceding 30 calendar days
+        - initial water = 50% of field capacity
+        - fixed 5 mm/day ET assumption
+        - canonical soil-water balance model
+
+    This is model-reconstructed soil moisture, not a measured
+    historical field observation.
     """
 
     decision_timestamp = pd.Timestamp(
         decision_date
-    )
+    ).normalize()
 
     historical = (
         data.loc[
@@ -172,6 +479,11 @@ def estimate_initial_moisture(
             "consecutive for soil-moisture reconstruction."
         )
 
+    if soil_type not in soils:
+        raise ValueError(
+            f"Unknown soil type: {soil_type}"
+        )
+
     field_capacity = float(
         soils[soil_type]["field_capacity_mm"]
     )
@@ -199,6 +511,11 @@ def estimate_initial_moisture(
         initial_water_mm=initial_water,
     )
 
+    if not results:
+        raise ValueError(
+            "Soil-water reconstruction returned no results."
+        )
+
     return float(
         results[-1]["final_water_mm"]
     )
@@ -212,20 +529,24 @@ def weather_only_baseline(training_data):
     """
     Simple weather-only baseline.
 
-    Uses only rainfall observations available before the
-    historical decision date.
+    Uses only rainfall observed before the decision date.
 
-    Decision rule:
-        recent 3-day rainfall >= 15 mm -> SOW TODAY
-        otherwise -> WAIT 5 DAYS
+    Rule:
 
-    This baseline intentionally does not use:
-        - soil type
-        - soil moisture
-        - crop establishment simulation
-        - economic calculations
-        - future rainfall
+        recent 3-day rainfall >= 15 mm
+            -> SOW TODAY
+
+        otherwise
+            -> WAIT 5 DAYS
+
+    No soil, crop-establishment, economic, or future information
+    is supplied to this baseline.
     """
+
+    if len(training_data) < RECENT_RAINFALL_DAYS:
+        raise ValueError(
+            "Insufficient training data for weather-only baseline."
+        )
 
     recent = training_data.tail(
         RECENT_RAINFALL_DAYS
@@ -255,21 +576,29 @@ def rule_based_baseline(
 
     Rules:
 
-        1. If recent rainfall and current soil moisture
-           indicate reasonable establishment conditions:
-               SOW TODAY
+        recent rainfall >= 15 mm AND
+        moisture fraction >= 0.50
+            -> SOW TODAY
 
-        2. If rainfall is very low and moisture is low:
-               SWITCH TO SOYBEAN
+        recent rainfall < 5 mm AND
+        moisture fraction < 0.50
+            -> SWITCH TO SOYBEAN
 
-        3. Otherwise:
-               WAIT 5 DAYS
+        otherwise
+            -> WAIT 5 DAYS
 
-    The thresholds are fixed before evaluating the historical
-    decision dates.
-
-    This is intentionally much simpler than CropLogic-Saathi.
+    Thresholds are fixed before evaluation.
     """
+
+    if len(training_data) < RECENT_RAINFALL_DAYS:
+        raise ValueError(
+            "Insufficient training data for rule baseline."
+        )
+
+    if soil_type not in soils:
+        raise ValueError(
+            f"Unknown soil type: {soil_type}"
+        )
 
     recent = training_data.tail(
         RECENT_RAINFALL_DAYS
@@ -282,6 +611,11 @@ def rule_based_baseline(
     field_capacity = float(
         soils[soil_type]["field_capacity_mm"]
     )
+
+    if field_capacity <= 0:
+        raise ValueError(
+            "Soil field capacity must be positive."
+        )
 
     moisture_fraction = (
         current_moisture_mm / field_capacity
@@ -315,8 +649,14 @@ def croplogic_decision(
     """
     Run the existing CropLogic-Saathi decision engine.
 
-    Only historical training data is supplied.
+    Only information available before the historical decision date
+    is supplied.
     """
+
+    if training_data.empty:
+        raise ValueError(
+            "CropLogic requires non-empty training data."
+        )
 
     rainfall_yesterday = float(
         training_data.iloc[-1]["rainfall_mm"]
@@ -330,7 +670,7 @@ def croplogic_decision(
         transition_matrix=None,
         num_simulations=NUM_SIMULATIONS,
         days_to_simulate=HORIZON,
-        random_seed=42,
+        random_seed=RANDOM_SEED,
         start_date=decision_date,
         rainfall_data=training_data,
         initial_state=initial_state,
@@ -340,7 +680,7 @@ def croplogic_decision(
 
 
 # ---------------------------------------------------------------------
-# HELD-OUT OUTCOME PROXY
+# HELD-OUT OUTCOME EVALUATION
 # ---------------------------------------------------------------------
 
 def calculate_realized_establishment(
@@ -350,19 +690,26 @@ def calculate_realized_establishment(
     initial_moisture_mm,
 ):
     """
-    Evaluate actual held-out rainfall using the same
-    soil-water and establishment model used by CropLogic-Saathi.
+    Evaluate held-out rainfall using the existing soil-water and
+    crop-establishment models.
 
-    Future observations are supplied only after the decision
-    has been generated.
+    Future rainfall must already have been held out from the
+    decision-making stage.
 
-    Returns:
-        1.0 if the crop establishes successfully.
+    Returns
+    -------
+    float
+        1.0 for successful modelled establishment,
         0.0 otherwise.
 
-    This is a historical realized-outcome evaluation,
-    not a field validation result.
+    This is a model-based historical outcome proxy, not field
+    validation.
     """
+
+    if crop_name not in crops:
+        raise ValueError(
+            f"Unknown crop: {crop_name}"
+        )
 
     crop = crops[crop_name]
 
@@ -407,27 +754,25 @@ def calculate_realized_outcome(
     initial_moisture_mm,
 ):
     """
-    Evaluate the realized outcome of a historical decision
-    using held-out rainfall and the soil-water model.
+    Evaluate one selected action against the held-out future.
 
-    Future rainfall is used only after the decision has
-    already been generated.
+    SOW TODAY
+        Evaluate cotton from the decision-date soil state.
 
-    For WAIT 5 DAYS:
-        - First simulate the five waiting days.
-        - The resulting soil water becomes the sowing-day
-          initial moisture.
-        - Then evaluate crop establishment using the
-          remaining held-out rainfall.
+    WAIT 5 DAYS
+        Simulate the first five held-out days.
+        Then evaluate cotton using the remaining held-out days.
 
-    Returns:
-        1.0 if establishment succeeds.
-        0.0 otherwise.
+    SWITCH TO SOYBEAN
+        Evaluate soybean from the decision-date soil state.
+
+    Future rainfall is used only after the decision has already
+    been generated.
     """
 
-    if decision == "SWITCH TO SOYBEAN":
+    if decision == "SOW TODAY":
 
-        crop_name = SWITCH_CROP
+        crop_name = CROP
 
         relevant_future = actual_future
 
@@ -449,9 +794,7 @@ def calculate_realized_outcome(
         wait_results = simulate_rainfall_soil_water(
             rainfall_scenario=[
                 {
-                    "rainfall_mm": float(
-                        rainfall
-                    )
+                    "rainfall_mm": float(rainfall)
                 }
                 for rainfall in wait_future[
                     "rainfall_mm"
@@ -461,6 +804,9 @@ def calculate_realized_outcome(
             initial_moisture_mm=initial_moisture_mm,
         )
 
+        if not wait_results:
+            return 0.0
+
         sowing_moisture = float(
             wait_results[-1]["final_water_mm"]
         )
@@ -469,13 +815,18 @@ def calculate_realized_outcome(
             wait_days:
         ]
 
-    else:
+    elif decision == "SWITCH TO SOYBEAN":
 
-        crop_name = CROP
+        crop_name = SWITCH_CROP
 
         relevant_future = actual_future
 
         sowing_moisture = initial_moisture_mm
+
+    else:
+        raise ValueError(
+            f"Unknown decision: {decision}"
+        )
 
     return calculate_realized_establishment(
         actual_future=relevant_future,
@@ -486,7 +837,105 @@ def calculate_realized_outcome(
 
 
 # ---------------------------------------------------------------------
-# SINGLE DATE
+# ALL-ACTION EVALUATION
+# ---------------------------------------------------------------------
+
+def evaluate_all_actions(
+    actual_future,
+    initial_moisture_mm,
+    soil_type,
+):
+    """
+    Evaluate all possible actions against the same held-out future.
+
+    This function must only be called after all decision-making
+    methods have already produced their decisions.
+    """
+
+    outcomes = {}
+
+    for action in ACTIONS:
+        outcomes[action] = calculate_realized_outcome(
+            decision=action,
+            actual_future=actual_future,
+            soil_type=soil_type,
+            initial_moisture_mm=initial_moisture_mm,
+        )
+
+    return outcomes
+
+
+def determine_best_actions(action_outcomes):
+    """
+    Determine the best realized action(s).
+
+    Multiple actions may tie because the current outcome proxy is
+    binary.
+    """
+
+    if not action_outcomes:
+        raise ValueError(
+            "No action outcomes were supplied."
+        )
+
+    best_outcome = max(
+        action_outcomes.values()
+    )
+
+    best_actions = [
+        action
+        for action, outcome in action_outcomes.items()
+        if outcome == best_outcome
+    ]
+
+    return best_actions, best_outcome
+
+
+def calculate_decision_regret(
+    selected_action,
+    action_outcomes,
+):
+    """
+    Calculate realized decision regret.
+
+        regret =
+            best realized outcome
+            -
+            selected action outcome
+
+    With the current binary outcome proxy, regret is 0 or 1.
+    """
+
+    if selected_action not in action_outcomes:
+        raise ValueError(
+            f"Selected action {selected_action!r} "
+            "is missing from action outcomes."
+        )
+
+    best_outcome = max(
+        action_outcomes.values()
+    )
+
+    selected_outcome = action_outcomes[
+        selected_action
+    ]
+
+    return float(
+        best_outcome - selected_outcome
+    )
+
+
+def selected_action_is_best(
+    selected_action,
+    best_actions,
+):
+    """Return whether the selected action is among the best actions."""
+
+    return selected_action in best_actions
+
+
+# ---------------------------------------------------------------------
+# SINGLE-DATE BACKTEST
 # ---------------------------------------------------------------------
 
 def run_single_date(
@@ -494,28 +943,103 @@ def run_single_date(
     decision_date,
 ):
     """
-    Evaluate all three approaches on one historical date.
+    Evaluate all three approaches on one historical decision date.
+
+    The information boundary is:
+
+        training:
+            dates < decision_date
+
+        decision:
+            generated using training only
+
+        evaluation:
+            decision_date + 1 through +14 days
     """
 
     decision_timestamp = pd.Timestamp(
         decision_date
-    )
+    ).normalize()
+
+    # -------------------------------------------------------------
+    # STRICT PRE-DECISION TRAINING
+    # -------------------------------------------------------------
 
     training = b.get_training_data(
         data,
         decision_timestamp,
     )
 
-    actual_future = b.get_actual_future_data(
-        data,
-        decision_timestamp,
-        HORIZON,
+    # -------------------------------------------------------------
+    # STRICT POST-DECISION HOLDOUT
+    # -------------------------------------------------------------
+    #
+    # We deliberately do not use the generic helper here if its
+    # current semantics include the decision date. The validation
+    # contract for this script is explicitly:
+    #
+    #     decision + 1 ... decision + HORIZON
+    #
+    # -------------------------------------------------------------
+
+    future_start = (
+        decision_timestamp
+        + pd.Timedelta(days=1)
     )
+
+    future_end_exclusive = (
+        decision_timestamp
+        + pd.Timedelta(days=HORIZON + 1)
+    )
+
+    actual_future = data.loc[
+        (data["date"] >= future_start)
+        & (data["date"] < future_end_exclusive)
+    ].copy()
+
+    actual_future = (
+        actual_future
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
+
+    if len(actual_future) != HORIZON:
+        raise ValueError(
+            f"Incomplete post-decision future window for "
+            f"{decision_timestamp.date()}: expected "
+            f"{HORIZON} days, found {len(actual_future)}."
+        )
+
+    expected_future_dates = pd.date_range(
+        start=future_start,
+        periods=HORIZON,
+        freq="D",
+    )
+
+    actual_future_dates = pd.DatetimeIndex(
+        actual_future["date"]
+    )
+
+    if not actual_future_dates.equals(
+        expected_future_dates
+    ):
+        raise ValueError(
+            "Post-decision future observations are not "
+            "consecutive calendar days."
+        )
+
+    # -------------------------------------------------------------
+    # INITIAL STATE
+    # -------------------------------------------------------------
 
     initial_state = b.get_initial_state(
         training,
         decision_timestamp,
     )
+
+    # -------------------------------------------------------------
+    # RECONSTRUCT INITIAL SOIL MOISTURE
+    # -------------------------------------------------------------
 
     initial_moisture = estimate_initial_moisture(
         data=data,
@@ -532,7 +1056,7 @@ def run_single_date(
     )
 
     # -------------------------------------------------------------
-    # SIMPLE RULE
+    # RULE BASED
     # -------------------------------------------------------------
 
     rule_decision = rule_based_baseline(
@@ -542,7 +1066,7 @@ def run_single_date(
     )
 
     # -------------------------------------------------------------
-    # CROPLOGIC-SAATHI
+    # CROPLOGIC
     # -------------------------------------------------------------
 
     croplogic_result = croplogic_decision(
@@ -556,49 +1080,147 @@ def run_single_date(
         croplogic_result["decision"]
     )
 
+    if croplogic_decision_name not in ACTIONS:
+        raise ValueError(
+            f"CropLogic returned unsupported decision: "
+            f"{croplogic_decision_name!r}"
+        )
+
     # -------------------------------------------------------------
-    # HELD-OUT OUTCOME EVALUATION
+    # HELD-OUT ACTION EVALUATION
+    # -------------------------------------------------------------
+    #
+    # This happens only AFTER all decisions have been generated.
     # -------------------------------------------------------------
 
-    weather_outcome = calculate_realized_outcome(
-        decision=weather_decision,
+    action_outcomes = evaluate_all_actions(
         actual_future=actual_future,
-        soil_type=SOIL_TYPE,
         initial_moisture_mm=initial_moisture,
+        soil_type=SOIL_TYPE,
     )
 
-    rule_outcome = calculate_realized_outcome(
-        decision=rule_decision,
-        actual_future=actual_future,
-        soil_type=SOIL_TYPE,
-        initial_moisture_mm=initial_moisture,
+    best_actions, best_outcome = (
+        determine_best_actions(
+            action_outcomes
+        )
     )
 
-    croplogic_outcome = calculate_realized_outcome(
-        decision=croplogic_decision_name,
-        actual_future=actual_future,
-        soil_type=SOIL_TYPE,
-        initial_moisture_mm=initial_moisture,
+    # -------------------------------------------------------------
+    # SELECTED-ACTION OUTCOMES
+    # -------------------------------------------------------------
+
+    weather_outcome = action_outcomes[
+        weather_decision
+    ]
+
+    rule_outcome = action_outcomes[
+        rule_decision
+    ]
+
+    croplogic_outcome = action_outcomes[
+        croplogic_decision_name
+    ]
+
+    # -------------------------------------------------------------
+    # REGRET
+    # -------------------------------------------------------------
+
+    weather_regret = calculate_decision_regret(
+        selected_action=weather_decision,
+        action_outcomes=action_outcomes,
     )
+
+    rule_regret = calculate_decision_regret(
+        selected_action=rule_decision,
+        action_outcomes=action_outcomes,
+    )
+
+    croplogic_regret = calculate_decision_regret(
+        selected_action=croplogic_decision_name,
+        action_outcomes=action_outcomes,
+    )
+
+    # -------------------------------------------------------------
+    # BEST-ACTION FLAGS
+    # -------------------------------------------------------------
+
+    weather_best_action = selected_action_is_best(
+        selected_action=weather_decision,
+        best_actions=best_actions,
+    )
+
+    rule_best_action = selected_action_is_best(
+        selected_action=rule_decision,
+        best_actions=best_actions,
+    )
+
+    croplogic_best_action = selected_action_is_best(
+        selected_action=croplogic_decision_name,
+        best_actions=best_actions,
+    )
+
+    # -------------------------------------------------------------
+    # ACTUAL HELD-OUT RAINFALL
+    # -------------------------------------------------------------
 
     actual_total = float(
         actual_future["rainfall_mm"].sum()
-    )   
-  
+    )
+
     return {
-        "decision_date": decision_date,
+        "decision_date": decision_timestamp.strftime(
+            "%Y-%m-%d"
+        ),
+        "evaluation_start": future_start.strftime(
+            "%Y-%m-%d"
+        ),
+        "evaluation_end": (
+            future_end_exclusive
+            - pd.Timedelta(days=1)
+        ).strftime("%Y-%m-%d"),
         "initial_state": initial_state,
+        "initial_moisture_mm": initial_moisture,
         "actual_14d_rainfall_mm": actual_total,
 
+        # Decisions
         "weather_only_decision": weather_decision,
-        "weather_only_outcome": weather_outcome,
-
         "rule_based_decision": rule_decision,
-        "rule_based_outcome": rule_outcome,
-
         "croplogic_decision": croplogic_decision_name,
+
+        # Selected-action outcomes
+        "weather_only_outcome": weather_outcome,
+        "rule_based_outcome": rule_outcome,
         "croplogic_outcome": croplogic_outcome,
 
+        # Every-action outcomes
+        "sow_today_outcome": action_outcomes[
+            "SOW TODAY"
+        ],
+        "wait_5_days_outcome": action_outcomes[
+            "WAIT 5 DAYS"
+        ],
+        "switch_to_soybean_outcome": action_outcomes[
+            "SWITCH TO SOYBEAN"
+        ],
+
+        # Best realized action
+        "best_actions": ", ".join(
+            best_actions
+        ),
+        "best_action_count": len(best_actions),
+        "best_outcome": best_outcome,
+
+        # Best-action flags
+        "weather_only_best_action": weather_best_action,
+        "rule_based_best_action": rule_best_action,
+        "croplogic_best_action": croplogic_best_action,
+
+        # Regret
+        "weather_only_regret": weather_regret,
+        "rule_based_regret": rule_regret,
+        "croplogic_regret": croplogic_regret,
+
+        # CropLogic probability outputs
         "cotton_germ_prob": croplogic_result[
             "germ_prob_today"
         ],
@@ -616,11 +1238,60 @@ def run_single_date(
 # ---------------------------------------------------------------------
 
 def run_validation(data):
-    """Run the baseline comparison across all dates."""
+    """Run the baseline comparison across all eligible dates."""
 
     rows = []
 
-    for decision_date in BACKTEST_DATES:
+    backtest_dates = generate_backtest_dates(
+        data
+    )
+
+    (
+        start_month,
+        start_day,
+        end_month,
+        end_day,
+    ) = get_crop_sowing_window(CROP)
+
+
+    # Windows formatting differs across platforms. Build the display
+    # string directly instead of relying on %-d.
+
+    crop_window_text = (
+        f"{pd.Timestamp(year=2000, month=start_month, day=start_day).strftime('%B')} "
+        f"{start_day} - "
+        f"{pd.Timestamp(year=2000, month=end_month, day=end_day).strftime('%B')} "
+        f"{end_day}"
+    )
+
+    print(
+        f"Generated {len(backtest_dates)} eligible "
+        f"historical decision dates."
+    )
+
+    print(
+        f"Primary crop         : "
+        f"{crops[CROP]['name']}"
+    )
+
+    print(
+        f"Optimal sowing window: "
+        f"{crop_window_text}"
+    )
+
+    print(
+        f"Sampling interval    : "
+        f"every {BACKTEST_INTERVAL_DAYS} days"
+    )
+
+    print(
+        f"Held-out horizon     : "
+        f"{HORIZON} days AFTER decision date"
+    )
+
+    print()
+
+    for decision_date in backtest_dates:
 
         print(
             f"Running validation: {decision_date}"
@@ -637,14 +1308,28 @@ def run_validation(data):
             f"  Weather-only : "
             f"{row['weather_only_decision']}"
         )
+
         print(
             f"  Rule-based   : "
             f"{row['rule_based_decision']}"
         )
+
         print(
-            f"  CropLogic     : "
+            f"  CropLogic    : "
             f"{row['croplogic_decision']}"
         )
+
+        print(
+            f"  Best action  : "
+            f"{row['best_actions']}"
+        )
+
+        print(
+            f"  Held-out     : "
+            f"{row['evaluation_start']} "
+            f"to {row['evaluation_end']}"
+        )
+
         print(
             f"  Actual 14d   : "
             f"{row['actual_14d_rainfall_mm']:.2f} mm"
@@ -658,46 +1343,75 @@ def run_validation(data):
 # ---------------------------------------------------------------------
 
 def print_report(results):
-    """Print baseline comparison results."""
+    """Print baseline and decision-quality validation results."""
+
+    if results.empty:
+        print("No validation results generated.")
+        return
 
     print()
-    print("=" * 110)
+    print("=" * 120)
     print("CROPLOGIC-SAATHI BASELINE COMPARISON")
-    print("=" * 110)
+    print("=" * 120)
 
     print(
         f"Crop                 : "
         f"{crops[CROP]['name']}"
     )
+
+    print(
+        f"Optimal window       : "
+        f"{crops[CROP]['optimal_sowing_window']}"
+    )
+
+    print(
+        f"Switch crop          : "
+        f"{crops[SWITCH_CROP]['name']}"
+    )
+
+    print(
+        f"Switch crop window   : "
+        f"{crops[SWITCH_CROP]['optimal_sowing_window']}"
+    )
+
     print(
         f"Soil                 : "
         f"{soils[SOIL_TYPE]['name']}"
     )
+
     print(
         f"Horizon              : "
-        f"{HORIZON} days"
+        f"{HORIZON} days after decision"
     )
+
     print(
         f"Simulations          : "
         f"{NUM_SIMULATIONS}"
     )
+
     print(
         f"Backtest dates       : "
         f"{len(results)}"
     )
 
     print()
-    print("-" * 110)
+    print("-" * 120)
 
     display_columns = [
         "decision_date",
+        "evaluation_start",
+        "evaluation_end",
         "actual_14d_rainfall_mm",
         "weather_only_decision",
         "rule_based_decision",
         "croplogic_decision",
-        "weather_only_outcome",
-        "rule_based_outcome",
-        "croplogic_outcome",
+        "sow_today_outcome",
+        "wait_5_days_outcome",
+        "switch_to_soybean_outcome",
+        "best_actions",
+        "best_action_count",
+        "croplogic_best_action",
+        "croplogic_regret",
     ]
 
     print(
@@ -712,9 +1426,9 @@ def print_report(results):
     # -------------------------------------------------------------
 
     print()
-    print("=" * 110)
+    print("=" * 120)
     print("DECISION DISTRIBUTION")
-    print("=" * 110)
+    print("=" * 120)
 
     for column, label in [
         (
@@ -739,11 +1453,7 @@ def print_report(results):
             .value_counts()
         )
 
-        for decision in [
-            "SOW TODAY",
-            "WAIT 5 DAYS",
-            "SWITCH TO SOYBEAN",
-        ]:
+        for decision in ACTIONS:
             print(
                 f"  {decision:<20}: "
                 f"{int(counts.get(decision, 0))}"
@@ -754,9 +1464,9 @@ def print_report(results):
     # -------------------------------------------------------------
 
     print()
-    print("=" * 110)
+    print("=" * 120)
     print("HELD-OUT OUTCOME PROXY")
-    print("=" * 110)
+    print("=" * 120)
 
     weather_score = (
         results["weather_only_outcome"]
@@ -789,44 +1499,262 @@ def print_report(results):
     )
 
     # -------------------------------------------------------------
+    # BEST-ACTION RATE
+    # -------------------------------------------------------------
+
+    print()
+    print("=" * 120)
+    print("BEST-ACTION RATE")
+    print("=" * 120)
+
+    weather_best_rate = (
+        results["weather_only_best_action"]
+        .mean()
+    )
+
+    rule_best_rate = (
+        results["rule_based_best_action"]
+        .mean()
+    )
+
+    croplogic_best_rate = (
+        results["croplogic_best_action"]
+        .mean()
+    )
+
+    print(
+        f"Weather-only best-action rate : "
+        f"{weather_best_rate:.3f}"
+    )
+
+    print(
+        f"Rule-based best-action rate   : "
+        f"{rule_best_rate:.3f}"
+    )
+
+    print(
+        f"CropLogic best-action rate    : "
+        f"{croplogic_best_rate:.3f}"
+    )
+
+    # -------------------------------------------------------------
+    # BEST-ACTION TIE RATE
+    # -------------------------------------------------------------
+
+    tie_rate = (
+        results["best_action_count"] > 1
+    ).mean()
+
+    print()
+    print(
+        f"Best-action tie rate          : "
+        f"{tie_rate:.3f}"
+    )
+
+    print(
+        "A high tie rate means the binary outcome proxy "
+        "cannot strongly distinguish among actions."
+    )
+
+    # -------------------------------------------------------------
+    # REGRET
+    # -------------------------------------------------------------
+
+    print()
+    print("=" * 120)
+    print("REALIZED DECISION REGRET")
+    print("=" * 120)
+
+    weather_regret = (
+        results["weather_only_regret"]
+        .mean()
+    )
+
+    rule_regret = (
+        results["rule_based_regret"]
+        .mean()
+    )
+
+    croplogic_regret = (
+        results["croplogic_regret"]
+        .mean()
+    )
+
+    print(
+        f"Weather-only mean regret : "
+        f"{weather_regret:.3f}"
+    )
+
+    print(
+        f"Rule-based mean regret   : "
+        f"{rule_regret:.3f}"
+    )
+
+    print(
+        f"CropLogic mean regret    : "
+        f"{croplogic_regret:.3f}"
+    )
+
+    print()
+    print(
+        "Regret = best realized outcome "
+        "minus selected action outcome."
+    )
+
+    print(
+        "The current binary outcome proxy makes regret "
+        "0 or 1 only."
+    )
+
+    # -------------------------------------------------------------
+    # ACTION OUTCOME SUMMARY
+    # -------------------------------------------------------------
+
+    print()
+    print("=" * 120)
+    print("REALIZED OUTCOME BY ACTION")
+    print("=" * 120)
+
+    print(
+        f"SOW TODAY success rate       : "
+        f"{results['sow_today_outcome'].mean():.3f}"
+    )
+
+    print(
+        f"WAIT 5 DAYS success rate     : "
+        f"{results['wait_5_days_outcome'].mean():.3f}"
+    )
+
+    print(
+        f"SWITCH TO SOYBEAN rate       : "
+        f"{results['switch_to_soybean_outcome'].mean():.3f}"
+    )
+
+    # -------------------------------------------------------------
+    # PROBABILITY SUMMARY
+    # -------------------------------------------------------------
+
+    print()
+    print("=" * 120)
+    print("CROPLOGIC PROBABILITY SUMMARY")
+    print("=" * 120)
+
+    print(
+        f"Mean cotton establishment probability : "
+        f"{results['cotton_germ_prob'].mean():.3f}"
+    )
+
+    print(
+        f"Mean wait establishment probability   : "
+        f"{results['wait_germ_prob'].mean():.3f}"
+    )
+
+    print(
+        f"Mean soybean establishment probability: "
+        f"{results['soybean_germ_prob'].mean():.3f}"
+    )
+
+    # -------------------------------------------------------------
+    # DECISION AGREEMENT
+    # -------------------------------------------------------------
+
+    print()
+    print("=" * 120)
+    print("DECISION AGREEMENT")
+    print("=" * 120)
+
+    weather_crop_logic_agreement = (
+        results["weather_only_decision"]
+        == results["croplogic_decision"]
+    ).mean()
+
+    rule_crop_logic_agreement = (
+        results["rule_based_decision"]
+        == results["croplogic_decision"]
+    ).mean()
+
+    print(
+        f"Weather-only vs CropLogic agreement : "
+        f"{weather_crop_logic_agreement:.3f}"
+    )
+
+    print(
+        f"Rule-based vs CropLogic agreement   : "
+        f"{rule_crop_logic_agreement:.3f}"
+    )
+
+    # -------------------------------------------------------------
     # INTERPRETATION
     # -------------------------------------------------------------
 
     print()
-    print("=" * 110)
+    print("=" * 120)
     print("INTERPRETATION")
-    print("=" * 110)
+    print("=" * 120)
 
     print(
-        "All three approaches receive information available "
+        "The primary validation population is restricted to the "
+        "documented optimal sowing window for the target crop."
+    )
+
+    print(
+        "The optimal sowing window is used as a validation-date "
+        "eligibility rule, not as a hard biological failure cutoff."
+    )
+
+    print(
+        "All decision methods receive only observations strictly "
         "before each historical decision date."
     )
 
     print(
-        "The subsequent 14-day rainfall is held out and "
-        "used only for evaluation."
+        "The 14-day evaluation period begins on the day AFTER "
+        "the decision date."
     )
 
     print(
-        "The weather-only and rule-based methods are "
-        "intentionally simple baselines."
+        "Future rainfall is therefore held out from the decision "
+        "and used only after the decision is generated."
     )
 
     print(
-        "The outcome metric is a simplified rainfall-based "
-        "proxy, not field-measured crop establishment."
+        "The weather-only and rule-based approaches are intentionally "
+        "simple baselines."
     )
 
     print(
-        "These realized outcomes are a historical model-based "
-        "evaluation and do not establish field performance, "
-        "causal impact, or agronomic superiority."
+        "For each date, all three possible actions are evaluated "
+        "against the same held-out rainfall trajectory."
     )
 
     print(
-        "This comparison is intended to test whether the "
-        "probabilistic decision approach provides useful "
-        "additional decision support beyond simple rules."
+        "The realized outcome is a simplified model-based "
+        "establishment proxy."
+    )
+
+    print(
+        "It is not field-measured establishment and should not "
+        "be interpreted as causal or agronomic impact evidence."
+    )
+
+    print(
+        "Best-action rate must be interpreted together with the "
+        "best-action tie rate because the current outcome is binary."
+    )
+
+    print(
+        "A high best-action rate with many ties does not demonstrate "
+        "that one decision method is substantially more accurate."
+    )
+
+    print(
+        "The current validation does not establish economic superiority."
+    )
+
+    print(
+        "The next validation stage should evaluate probability "
+        "calibration and a more informative decision/economic "
+        "outcome metric before making strong performance claims."
     )
 
 
@@ -845,4 +1773,3 @@ if __name__ == "__main__":
     print_report(
         results
     )
-
