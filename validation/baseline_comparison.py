@@ -680,7 +680,7 @@ def croplogic_decision(
 # HELD-OUT OUTCOME EVALUATION
 # ---------------------------------------------------------------------
 
-def calculate_realized_establishment(
+def _evaluate_realized_establishment(
     actual_future,
     crop_name,
     soil_type,
@@ -690,14 +690,11 @@ def calculate_realized_establishment(
     Evaluate held-out rainfall using the existing soil-water and
     crop-establishment models.
 
-    Future rainfall must already have been held out from the
-    decision-making stage.
-
     Returns
     -------
-    float
-        1.0 for successful modelled establishment,
-        0.0 otherwise.
+    dict | None
+        Full crop-establishment result, or None when the held-out
+        trajectory is shorter than the crop germination period.
 
     This is a model-based historical outcome proxy, not field
     validation.
@@ -722,7 +719,7 @@ def calculate_realized_establishment(
     )
 
     if len(rainfall) < germination_days:
-        return 0.0
+        return None
 
     et_series = [
         DAILY_ET_MM
@@ -736,16 +733,270 @@ def calculate_realized_establishment(
         initial_water_mm=initial_moisture_mm,
     )
 
-    establishment = evaluate_establishment(
+    return evaluate_establishment(
         soil_water_results=soil_water_results,
         crop=crop_name,
         soil_type=soil_type,
     )
 
-    return float(
-        establishment["establishment_success"]
+def _evaluate_realized_establishment(
+    actual_future,
+    crop_name,
+    soil_type,
+    initial_moisture_mm,
+):
+    """
+    Evaluate held-out rainfall using the existing soil-water and
+    crop-establishment models.
+
+    Returns the full establishment result so validation can use
+    both the existing binary outcome and continuous diagnostics.
+    """
+
+    if crop_name not in crops:
+        raise ValueError(
+            f"Unknown crop: {crop_name}"
+        )
+
+    crop = crops[crop_name]
+
+    germination_days = int(
+        crop["germination_days"]
     )
 
+    rainfall = (
+        actual_future["rainfall_mm"]
+        .astype(float)
+        .head(germination_days)
+        .tolist()
+    )
+
+    if len(rainfall) < germination_days:
+        return None
+
+    et_series = [
+        DAILY_ET_MM
+        for _ in rainfall
+    ]
+
+    soil_water_results = simulate_soil_water(
+        rainfall_series=rainfall,
+        et_series=et_series,
+        soil_type=soil_type,
+        initial_water_mm=initial_moisture_mm,
+    )
+
+    return evaluate_establishment(
+        soil_water_results=soil_water_results,
+        crop=crop_name,
+        soil_type=soil_type,
+    )
+
+def calculate_realized_establishment(
+    actual_future,
+    crop_name,
+    soil_type,
+    initial_moisture_mm,
+):
+    """
+    Return the existing binary model-based establishment outcome.
+
+    This is a model-based historical outcome proxy, not field
+    validation.
+    """
+
+    establishment = _evaluate_realized_establishment(
+        actual_future=actual_future,
+        crop_name=crop_name,
+        soil_type=soil_type,
+        initial_moisture_mm=initial_moisture_mm,
+    )
+
+    if establishment is None:
+        return 0.0
+
+    return float(
+        float(establishment["establishment_success"])
+    )
+
+def calculate_establishment_diagnostics(
+    establishment,
+):
+    """
+    Calculate continuous model-based establishment diagnostics.
+
+    These are validation diagnostics derived from the existing
+    crop-establishment model, not biological guarantees.
+    """
+
+    if establishment is None:
+        return None
+
+    daily_results = establishment["daily_results"]
+
+    minimum_required_pct = (
+        establishment["minimum_moisture_pct"]
+    )
+
+    moisture_margins = [
+        item["moisture_pct"] - minimum_required_pct
+        for item in daily_results
+    ]
+
+    cumulative_moisture_deficit = sum(
+        max(
+            0.0,
+            minimum_required_pct - item["moisture_pct"],
+        )
+        for item in daily_results
+    )
+
+    return {
+        "establishment_success": float(
+            establishment["establishment_success"]
+        ),
+        "minimum_moisture_margin_pct": min(
+            moisture_margins
+        ),
+        "cumulative_moisture_deficit_pct_days": (
+            cumulative_moisture_deficit
+        ),
+        "successful_days": establishment[
+            "successful_days"
+        ],
+        "germination_days": establishment[
+            "germination_days"
+        ],
+    }
+
+def calculate_realized_diagnostics(
+    decision,
+    actual_future,
+    soil_type,
+    initial_moisture_mm,
+):
+    """
+    Evaluate one held-out action and return continuous
+    establishment diagnostics.
+
+    The action semantics are identical to
+    calculate_realized_outcome().
+    """
+
+    prepared = _prepare_realized_action(
+        decision=decision,
+        actual_future=actual_future,
+        soil_type=soil_type,
+        initial_moisture_mm=initial_moisture_mm,
+    )
+
+    if prepared is None:
+        return None
+
+    (
+        crop_name,
+        relevant_future,
+        sowing_moisture,
+    ) = prepared
+
+    establishment = _evaluate_realized_establishment(
+        actual_future=relevant_future,
+        crop_name=crop_name,
+        soil_type=soil_type,
+        initial_moisture_mm=sowing_moisture,
+    )
+
+    return calculate_establishment_diagnostics(
+        establishment
+    )
+
+def _prepare_realized_action(
+    decision,
+    actual_future,
+    soil_type,
+    initial_moisture_mm,
+):
+    """
+    Prepare the crop, held-out trajectory, and sowing moisture
+    corresponding to one decision.
+
+    Returns
+    -------
+    tuple
+        (crop_name, relevant_future, sowing_moisture)
+
+    Future rainfall is used only after the decision has already
+    been generated.
+    """
+
+    if decision == "SOW TODAY":
+
+        crop_name = CROP
+
+        relevant_future = actual_future
+
+        sowing_moisture = initial_moisture_mm
+
+    elif decision == "WAIT 5 DAYS":
+
+        crop_name = CROP
+
+        wait_days = 5
+
+        if len(actual_future) <= wait_days:
+            return None
+
+        wait_future = actual_future.iloc[
+            :wait_days
+        ]
+
+        wait_rainfall = (
+            wait_future["rainfall_mm"]
+            .astype(float)
+            .tolist()
+        )
+
+        wait_et = [
+            DAILY_ET_MM
+            for _ in wait_rainfall
+        ]
+
+        wait_results = simulate_soil_water(
+            rainfall_series=wait_rainfall,
+            et_series=wait_et,
+            soil_type=soil_type,
+            initial_water_mm=initial_moisture_mm,
+        )
+
+        if not wait_results:
+            return None
+
+        sowing_moisture = float(
+            wait_results[-1]["final_water_mm"]
+        )
+
+        relevant_future = actual_future.iloc[
+            wait_days:
+        ]
+
+    elif decision == "SWITCH TO SOYBEAN":
+
+        crop_name = SWITCH_CROP
+
+        relevant_future = actual_future
+
+        sowing_moisture = initial_moisture_mm
+
+    else:
+        raise ValueError(
+            f"Unknown decision: {decision}"
+        )
+
+    return (
+        crop_name,
+        relevant_future,
+        sowing_moisture,
+    )
 
 def calculate_realized_outcome(
     decision,
@@ -770,68 +1021,21 @@ def calculate_realized_outcome(
     been generated.
     """
 
-    if decision == "SOW TODAY":
-
-        crop_name = CROP
-
-        relevant_future = actual_future
-
-        sowing_moisture = initial_moisture_mm
-
-    elif decision == "WAIT 5 DAYS":
-
-        crop_name = CROP
-
-        wait_days = 5
-
-        if len(actual_future) <= wait_days:
-            return 0.0
-
-        wait_future = actual_future.iloc[
-            :wait_days
-        ]
-
-        wait_rainfall = (
-            wait_future["rainfall_mm"]
-            .astype(float)
-            .tolist()
-        )
-
-        wait_et = [
-            DAILY_ET_MM
-            for _ in wait_rainfall
-        ]
-
-        wait_results = simulate_soil_water(
-        rainfall_series=wait_rainfall,
-        et_series=wait_et,
+    prepared = _prepare_realized_action(
+        decision=decision,
+        actual_future=actual_future,
         soil_type=soil_type,
-        initial_water_mm=initial_moisture_mm,
-        )
+        initial_moisture_mm=initial_moisture_mm,
+    )
 
-        if not wait_results:
-            return 0.0
+    if prepared is None:
+        return 0.0
 
-        sowing_moisture = float(
-            wait_results[-1]["final_water_mm"]
-        )
-
-        relevant_future = actual_future.iloc[
-            wait_days:
-        ]
-
-    elif decision == "SWITCH TO SOYBEAN":
-
-        crop_name = SWITCH_CROP
-
-        relevant_future = actual_future
-
-        sowing_moisture = initial_moisture_mm
-
-    else:
-        raise ValueError(
-            f"Unknown decision: {decision}"
-        )
+    (
+        crop_name,
+        relevant_future,
+        sowing_moisture,
+    ) = prepared
 
     return calculate_realized_establishment(
         actual_future=relevant_future,
@@ -839,7 +1043,6 @@ def calculate_realized_outcome(
         soil_type=soil_type,
         initial_moisture_mm=sowing_moisture,
     )
-
 
 # ---------------------------------------------------------------------
 # ALL-ACTION EVALUATION
@@ -869,6 +1072,28 @@ def evaluate_all_actions(
 
     return outcomes
 
+
+def evaluate_all_action_diagnostics(
+    actual_future,
+    initial_moisture_mm,
+    soil_type,
+):
+    """
+    Evaluate continuous establishment diagnostics for all
+    candidate actions on the same held-out future.
+    """
+
+    diagnostics = {}
+
+    for action in ACTIONS:
+        diagnostics[action] = calculate_realized_diagnostics(
+            decision=action,
+            actual_future=actual_future,
+            soil_type=soil_type,
+            initial_moisture_mm=initial_moisture_mm,
+        )
+
+    return diagnostics
 
 def determine_best_actions(action_outcomes):
     """
@@ -1104,6 +1329,24 @@ def run_single_date(
         soil_type=SOIL_TYPE,
     )
 
+    action_diagnostics = evaluate_all_action_diagnostics(
+        actual_future=actual_future,
+        initial_moisture_mm=initial_moisture,
+        soil_type=SOIL_TYPE,
+    )
+
+    sow_diagnostics = action_diagnostics[
+        "SOW TODAY"
+    ]
+
+    wait_diagnostics = action_diagnostics[
+        "WAIT 5 DAYS"
+    ]
+
+    switch_diagnostics = action_diagnostics[
+        "SWITCH TO SOYBEAN"
+    ]
+
     best_actions, best_outcome = (
         determine_best_actions(
             action_outcomes
@@ -1207,6 +1450,62 @@ def run_single_date(
         "switch_to_soybean_outcome": action_outcomes[
             "SWITCH TO SOYBEAN"
         ],
+
+        "sow_min_moisture_margin_pct": (
+            sow_diagnostics["minimum_moisture_margin_pct"]
+        ),
+
+        "sow_cumulative_moisture_deficit_pct_days": (
+            sow_diagnostics[
+                "cumulative_moisture_deficit_pct_days"
+            ]
+        ),
+
+        "sow_successful_days": (
+            sow_diagnostics["successful_days"]
+        ),
+
+        "sow_germination_days": (
+            sow_diagnostics["germination_days"]
+        ),
+
+        "wait_min_moisture_margin_pct": (
+            wait_diagnostics["minimum_moisture_margin_pct"]
+        ),
+
+        "wait_cumulative_moisture_deficit_pct_days": (
+            wait_diagnostics[
+                "cumulative_moisture_deficit_pct_days"
+            ]
+        ),
+
+        "wait_successful_days": (
+            wait_diagnostics["successful_days"]
+        ),
+
+        "wait_germination_days": (
+            wait_diagnostics["germination_days"]
+        ),
+
+        "switch_min_moisture_margin_pct": (
+            switch_diagnostics[
+                "minimum_moisture_margin_pct"
+            ]
+        ),
+
+        "switch_cumulative_moisture_deficit_pct_days": (
+            switch_diagnostics[
+                "cumulative_moisture_deficit_pct_days"
+            ]
+        ),
+
+        "switch_successful_days": (
+            switch_diagnostics["successful_days"]
+        ),
+
+        "switch_germination_days": (
+            switch_diagnostics["germination_days"]
+        ),
 
         # Best realized action
         "best_actions": ", ".join(
@@ -1707,6 +2006,206 @@ def print_report(results):
     print()
     print("-" * 120)
 
+    # ------------------------------------------------------------------
+    # Decision distributions
+    # ------------------------------------------------------------------
+
+    print("\nDECISION DISTRIBUTIONS")
+    print("----------------------")
+
+    for column, label in [
+        (
+            "weather_only_decision",
+            "Weather-only",
+        ),
+        (
+            "rule_based_decision",
+            "Rule-based",
+        ),
+        (
+            "croplogic_decision",
+            "CropLogic-Saathi",
+        ),
+    ]:
+        print(f"\n{label}:")
+
+        counts = (
+            results[column]
+            .value_counts()
+            .reindex(
+                ACTIONS,
+                fill_value=0,
+            )
+        )
+
+        for action, count in counts.items():
+            print(
+                f"  {action}: {count}"
+            )
+
+    # ------------------------------------------------------------------
+    # Binary held-out outcomes
+    # ------------------------------------------------------------------
+
+    print("\nBINARY HELD-OUT ESTABLISHMENT OUTCOMES")
+    print("---------------------------------------")
+
+    print(
+        f"Weather-only mean outcome : "
+        f"{results['weather_only_outcome'].mean():.3f}"
+    )
+
+    print(
+        f"Rule-based mean outcome   : "
+        f"{results['rule_based_outcome'].mean():.3f}"
+    )
+
+    print(
+        f"CropLogic mean outcome    : "
+        f"{results['croplogic_outcome'].mean():.3f}"
+    )
+
+    # ------------------------------------------------------------------
+    # Best-action rates
+    # ------------------------------------------------------------------
+
+    print("\nBEST-ACTION RATES")
+    print("-----------------")
+
+    print(
+        f"Weather-only : "
+        f"{results['weather_only_best_action'].mean():.3f}"
+    )
+
+    print(
+        f"Rule-based   : "
+        f"{results['rule_based_best_action'].mean():.3f}"
+    )
+
+    print(
+        f"CropLogic    : "
+        f"{results['croplogic_best_action'].mean():.3f}"
+    )
+
+    print(
+        f"\nBest-action tie rate: "
+        f"{(results['best_action_count'] > 1).mean():.3f}"
+    )
+
+    # ------------------------------------------------------------------
+    # Binary regret
+    # ------------------------------------------------------------------
+
+    print("\nBINARY DECISION REGRET")
+    print("----------------------")
+
+    print(
+        f"Weather-only mean regret : "
+        f"{results['weather_only_regret'].mean():.3f}"
+    )
+
+    print(
+        f"Rule-based mean regret   : "
+        f"{results['rule_based_regret'].mean():.3f}"
+    )
+
+    print(
+        f"CropLogic mean regret    : "
+        f"{results['croplogic_regret'].mean():.3f}"
+    )
+
+    # ------------------------------------------------------------------
+    # Action outcome success rates
+    # ------------------------------------------------------------------
+
+    print("\nACTION OUTCOME SUCCESS RATES")
+    print("-----------------------------")
+
+    print(
+        f"SOW TODAY: "
+        f"{results['sow_today_outcome'].mean():.3f}"
+    )
+
+    print(
+        f"WAIT 5 DAYS: "
+        f"{results['wait_5_days_outcome'].mean():.3f}"
+    )
+
+    print(
+        f"SWITCH TO SOYBEAN: "
+        f"{results['switch_to_soybean_outcome'].mean():.3f}"
+    )
+
+    # ------------------------------------------------------------------
+    # Phase 2: continuous establishment diagnostics
+    # ------------------------------------------------------------------
+
+    print("\nCONTINUOUS ESTABLISHMENT DIAGNOSTICS")
+    print("--------------------------------------")
+
+    diagnostic_actions = {
+        "SOW TODAY": "sow",
+        "WAIT 5 DAYS": "wait",
+        "SWITCH TO SOYBEAN": "switch",
+    }
+
+    for action, prefix in diagnostic_actions.items():
+
+        margin_column = (
+            f"{prefix}_min_moisture_margin_pct"
+        )
+
+        deficit_column = (
+            f"{prefix}_cumulative_moisture_deficit_pct_days"
+        )
+
+        successful_days_column = (
+            f"{prefix}_successful_days"
+        )
+
+        germination_days_column = (
+            f"{prefix}_germination_days"
+        )
+
+        mean_margin = (
+            results[margin_column].mean()
+        )
+
+        mean_deficit = (
+            results[deficit_column].mean()
+        )
+
+        successful_day_ratio = (
+            results[successful_days_column]
+            / results[germination_days_column]
+        ).mean()
+
+        print(
+            f"{action}:"
+        )
+
+        print(
+            f"  Mean minimum moisture margin: "
+            f"{mean_margin:.2f} percentage points"
+        )
+
+        print(
+            f"  Mean cumulative moisture deficit: "
+            f"{mean_deficit:.2f} %-days"
+        )
+
+        print(
+            f"  Mean successful-day ratio: "
+            f"{successful_day_ratio:.3f}"
+        )
+
+    # ------------------------------------------------------------------
+    # Detailed per-date table
+    # ------------------------------------------------------------------
+
+    print()
+    print("-" * 120)
+
     display_columns = [
         "decision_date",
         "evaluation_start",
@@ -1718,6 +2217,22 @@ def print_report(results):
         "sow_today_outcome",
         "wait_5_days_outcome",
         "switch_to_soybean_outcome",
+
+        "sow_min_moisture_margin_pct",
+        "sow_cumulative_moisture_deficit_pct_days",
+        "sow_successful_days",
+        "sow_germination_days",
+
+        "wait_min_moisture_margin_pct",
+        "wait_cumulative_moisture_deficit_pct_days",
+        "wait_successful_days",
+        "wait_germination_days",
+
+        "switch_min_moisture_margin_pct",
+        "switch_cumulative_moisture_deficit_pct_days",
+        "switch_successful_days",
+        "switch_germination_days",
+
         "best_actions",
         "best_action_count",
         "croplogic_best_action",
@@ -1730,6 +2245,110 @@ def print_report(results):
             float_format=lambda x: f"{x:.2f}",
         )
     )
+
+    # ------------------------------------------------------------------
+    # Probability summary
+    # ------------------------------------------------------------------
+
+    print("\nPREDICTED ESTABLISHMENT PROBABILITIES")
+    print("--------------------------------------")
+
+    print(
+        f"Cotton / SOW TODAY mean probability : "
+        f"{results['cotton_germ_prob'].mean():.3f}"
+    )
+
+    print(
+        f"WAIT mean probability               : "
+        f"{results['wait_germ_prob'].mean():.3f}"
+    )
+
+    print(
+        f"Soybean / SWITCH mean probability   : "
+        f"{results['soybean_germ_prob'].mean():.3f}"
+    )
+
+    # ------------------------------------------------------------------
+    # Decision agreement
+    # ------------------------------------------------------------------
+
+    print("\nDECISION AGREEMENT")
+    print("------------------")
+
+    weather_agreement = (
+        results["weather_only_decision"]
+        == results["croplogic_decision"]
+    )
+
+    rule_agreement = (
+        results["rule_based_decision"]
+        == results["croplogic_decision"]
+    )
+
+    print(
+        f"Weather-only vs CropLogic : "
+        f"{weather_agreement.mean():.3f}"
+    )
+
+    print(
+        f"Rule-based vs CropLogic   : "
+        f"{rule_agreement.mean():.3f}"
+    )
+
+    # ------------------------------------------------------------------
+    # Probability calibration
+    # ------------------------------------------------------------------
+
+    print_probability_calibration(results)
+
+    # ------------------------------------------------------------------
+    # Interpretation
+    # ------------------------------------------------------------------
+
+    print("\nINTERPRETATION")
+    print("--------------")
+
+    print(
+        "Validation uses decision dates inside the documented "
+        "crop sowing window."
+    )
+
+    print(
+        "Each decision is generated using information available "
+        "strictly before the decision date."
+    )
+
+    print(
+        "Held-out rainfall covers the 14 calendar days after "
+        "the decision."
+    )
+
+    print(
+        "The binary establishment outcome is a model-based "
+        "historical proxy, not field validation."
+    )
+
+    print(
+        "Continuous establishment diagnostics are derived from "
+        "the existing soil-water and crop-establishment model."
+    )
+
+    print(
+        "They are diagnostic measures and are not biological "
+        "guarantees or a replacement for the binary outcome."
+    )
+
+    print(
+        "Best-action ties are retained rather than forcing a "
+        "continuous diagnostic winner."
+    )
+
+    print(
+        "These results do not establish economic superiority "
+        "or field-level impact."
+    )
+
+
 
     # -------------------------------------------------------------
     # DECISION DISTRIBUTION
