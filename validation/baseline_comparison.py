@@ -77,11 +77,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import src.backtesting as b
 from src.crop_data import crops
-from src.decision_engine import (
-    evaluate_establishment,
-    make_decision,
-    simulate_rainfall_soil_water,
-)
+from src.decision_engine import make_decision
+from src.crop_establishment import evaluate_establishment
 from src.soil_data import soils
 from src.soil_water import simulate_soil_water
 
@@ -727,13 +724,16 @@ def calculate_realized_establishment(
     if len(rainfall) < germination_days:
         return 0.0
 
-    soil_water_results = simulate_rainfall_soil_water(
-        rainfall_scenario=[
-            {"rainfall_mm": value}
-            for value in rainfall
-        ],
+    et_series = [
+        DAILY_ET_MM
+        for _ in rainfall
+    ]
+
+    soil_water_results = simulate_soil_water(
+        rainfall_series=rainfall,
+        et_series=et_series,
         soil_type=soil_type,
-        initial_moisture_mm=initial_moisture_mm,
+        initial_water_mm=initial_moisture_mm,
     )
 
     establishment = evaluate_establishment(
@@ -791,17 +791,22 @@ def calculate_realized_outcome(
             :wait_days
         ]
 
-        wait_results = simulate_rainfall_soil_water(
-            rainfall_scenario=[
-                {
-                    "rainfall_mm": float(rainfall)
-                }
-                for rainfall in wait_future[
-                    "rainfall_mm"
-                ]
-            ],
-            soil_type=soil_type,
-            initial_moisture_mm=initial_moisture_mm,
+        wait_rainfall = (
+            wait_future["rainfall_mm"]
+            .astype(float)
+            .tolist()
+        )
+
+        wait_et = [
+            DAILY_ET_MM
+            for _ in wait_rainfall
+        ]
+
+        wait_results = simulate_soil_water(
+        rainfall_series=wait_rainfall,
+        et_series=wait_et,
+        soil_type=soil_type,
+        initial_water_mm=initial_moisture_mm,
         )
 
         if not wait_results:
@@ -1339,6 +1344,311 @@ def run_validation(data):
 
 
 # ---------------------------------------------------------------------
+# PROBABILITY CALIBRATION
+# ---------------------------------------------------------------------
+
+CALIBRATION_BINS = [
+    (0.0, 0.2),
+    (0.2, 0.4),
+    (0.4, 0.6),
+    (0.6, 0.8),
+    (0.8, 1.0),
+]
+
+
+def calculate_brier_score(predicted, observed):
+    """
+    Calculate the binary Brier score.
+
+    Lower is better.
+
+    Brier score:
+        mean((predicted_probability - observed_outcome)^2)
+
+    Parameters
+    ----------
+    predicted : iterable
+        Predicted probabilities in [0, 1].
+
+    observed : iterable
+        Binary observed outcomes in {0, 1}.
+    """
+
+    predicted = pd.Series(
+        predicted,
+        dtype=float,
+    )
+
+    observed = pd.Series(
+        observed,
+        dtype=float,
+    )
+
+    if len(predicted) != len(observed):
+        raise ValueError(
+            "Predicted and observed values must have "
+            "the same length."
+        )
+
+    if predicted.empty:
+        raise ValueError(
+            "Cannot calculate Brier score on empty data."
+        )
+
+    if not predicted.between(0.0, 1.0).all():
+        raise ValueError(
+            "Predicted probabilities must be between 0 and 1."
+        )
+
+    if not observed.isin([0.0, 1.0]).all():
+        raise ValueError(
+            "Observed outcomes must be binary 0/1."
+        )
+
+    return float(
+        ((predicted - observed) ** 2).mean()
+    )
+
+
+def calculate_calibration_bins(
+    predicted,
+    observed,
+    bins=None,
+):
+    """
+    Calculate reliability/calibration statistics.
+
+    Each row contains:
+
+        probability bin
+        number of observations
+        mean predicted probability
+        observed success rate
+
+    The final bin includes probability == 1.0.
+    """
+
+    if bins is None:
+        bins = CALIBRATION_BINS
+
+    predicted = pd.Series(
+        predicted,
+        dtype=float,
+    )
+
+    observed = pd.Series(
+        observed,
+        dtype=float,
+    )
+
+    if len(predicted) != len(observed):
+        raise ValueError(
+            "Predicted and observed values must have "
+            "the same length."
+        )
+
+    rows = []
+
+    for index, (lower, upper) in enumerate(bins):
+
+        if index == len(bins) - 1:
+            mask = (
+                (predicted >= lower)
+                & (predicted <= upper)
+            )
+        else:
+            mask = (
+                (predicted >= lower)
+                & (predicted < upper)
+            )
+
+        bin_predicted = predicted[mask]
+        bin_observed = observed[mask]
+
+        if len(bin_predicted) == 0:
+            rows.append(
+                {
+                    "bin": f"{lower:.1f}-{upper:.1f}",
+                    "count": 0,
+                    "mean_predicted": None,
+                    "observed_rate": None,
+                }
+            )
+            continue
+
+        rows.append(
+            {
+                "bin": f"{lower:.1f}-{upper:.1f}",
+                "count": int(len(bin_predicted)),
+                "mean_predicted": float(
+                    bin_predicted.mean()
+                ),
+                "observed_rate": float(
+                    bin_observed.mean()
+                ),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def print_probability_calibration(results):
+    """
+    Print Brier scores and reliability-bin statistics.
+
+    Calibration is evaluated against the same held-out outcomes
+    already used by the baseline comparison.
+
+    No future rainfall is used to generate the probabilities.
+    """
+
+    probability_specs = [
+        (
+            "Cotton SOW",
+            "cotton_germ_prob",
+            "sow_today_outcome",
+        ),
+        (
+            "Cotton WAIT",
+            "wait_germ_prob",
+            "wait_5_days_outcome",
+        ),
+        (
+            "Soybean SWITCH",
+            "soybean_germ_prob",
+            "switch_to_soybean_outcome",
+        ),
+    ]
+
+    print()
+    print("=" * 120)
+    print("CROPLOGIC-SAATHI PROBABILITY CALIBRATION")
+    print("=" * 120)
+
+    print(
+        "Brier score: lower is better."
+    )
+
+    print(
+        "Observed outcome is the held-out model-based "
+        "establishment outcome for the corresponding action."
+    )
+
+    print()
+
+    summary_rows = []
+
+    for label, probability_column, outcome_column in probability_specs:
+
+        predicted = results[
+            probability_column
+        ]
+
+        observed = results[
+            outcome_column
+        ]
+
+        brier = calculate_brier_score(
+            predicted,
+            observed,
+        )
+
+        summary_rows.append(
+            {
+                "action": label,
+                "brier_score": brier,
+                "mean_predicted": float(
+                    predicted.mean()
+                ),
+                "observed_rate": float(
+                    observed.mean()
+                ),
+            }
+        )
+
+    summary = pd.DataFrame(
+        summary_rows
+    )
+
+    print(
+        f"{'Action':<22}"
+        f"{'Brier score':>15}"
+        f"{'Mean predicted':>18}"
+        f"{'Observed':>15}"
+    )
+
+    print("-" * 70)
+
+    for row in summary.itertuples(index=False):
+
+        print(
+            f"{row.action:<22}"
+            f"{row.brier_score:>15.3f}"
+            f"{row.mean_predicted:>18.3f}"
+            f"{row.observed_rate:>15.3f}"
+        )
+
+    # -------------------------------------------------------------
+    # RELIABILITY BINS
+    # -------------------------------------------------------------
+
+    for label, probability_column, outcome_column in probability_specs:
+
+        print()
+        print("-" * 120)
+        print(
+            f"CALIBRATION BINS: {label}"
+        )
+        print("-" * 120)
+
+        calibration = calculate_calibration_bins(
+            predicted=results[
+                probability_column
+            ],
+            observed=results[
+                outcome_column
+            ],
+        )
+
+        print(
+            f"{'Bin':<12}"
+            f"{'N':>8}"
+            f"{'Mean predicted':>20}"
+            f"{'Observed rate':>18}"
+        )
+
+        print("-" * 65)
+
+        for row in calibration.itertuples(index=False):
+
+            if row.count == 0:
+                print(
+                    f"{row.bin:<12}"
+                    f"{0:>8}"
+                    f"{'--':>20}"
+                    f"{'--':>18}"
+                )
+            else:
+                print(
+                    f"{row.bin:<12}"
+                    f"{row.count:>8}"
+                    f"{row.mean_predicted:>20.3f}"
+                    f"{row.observed_rate:>18.3f}"
+                )
+
+    print()
+    print(
+        "Calibration interpretation: within a well-populated "
+        "probability bin, mean predicted probability should be "
+        "reasonably close to the observed success rate."
+    )
+
+    print(
+        "With only the current historical sample, sparse bins "
+        "should not be treated as strong evidence of calibration."
+    )
+
+# ---------------------------------------------------------------------
 # REPORT
 # ---------------------------------------------------------------------
 
@@ -1755,6 +2065,14 @@ def print_report(results):
         "The next validation stage should evaluate probability "
         "calibration and a more informative decision/economic "
         "outcome metric before making strong performance claims."
+    )
+
+    # -------------------------------------------------------------
+    # PROBABILITY CALIBRATION
+    # -------------------------------------------------------------
+
+    print_probability_calibration(
+        results
     )
 
 
