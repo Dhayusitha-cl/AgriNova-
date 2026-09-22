@@ -869,6 +869,66 @@ def calculate_establishment_diagnostics(
         ],
     }
 
+def calculate_continuous_action_outcomes(action_diagnostics):
+    """
+    Convert existing establishment diagnostics into a continuous
+    realized outcome for each action.
+
+    The outcome is the proportion of germination days on which
+    the minimum moisture requirement was satisfied.
+
+    This is a model-based historical validation metric, not a
+    field-measured agronomic outcome.
+    """
+
+    outcomes = {}
+
+    for action, diagnostics in action_diagnostics.items():
+        germination_days = diagnostics["germination_days"]
+
+        if germination_days <= 0:
+            raise ValueError(
+                f"Invalid germination_days for {action}"
+            )
+
+        outcomes[action] = (
+            diagnostics["successful_days"]
+            / germination_days
+        )
+
+    return outcomes
+
+
+def calculate_continuous_decision_regret(
+    selected_action,
+    continuous_outcomes,
+):
+    """
+    Calculate continuous regret for a selected action.
+
+    Regret is the difference between the best realized
+    successful-day ratio and the ratio achieved by the
+    selected action.
+
+    This metric is validation-only and does not alter the
+    CropLogic decision engine.
+    """
+
+    if selected_action not in continuous_outcomes:
+        raise ValueError(
+            f"Unknown selected action: {selected_action}"
+        )
+
+    best_outcome = max(
+        continuous_outcomes.values()
+    )
+
+    selected_outcome = continuous_outcomes[
+        selected_action
+    ]
+
+    return best_outcome - selected_outcome
+
 def calculate_realized_diagnostics(
     decision,
     actual_future,
@@ -1347,6 +1407,33 @@ def run_single_date(
         "SWITCH TO SOYBEAN"
     ]
 
+    continuous_outcomes = (
+        calculate_continuous_action_outcomes(
+            action_diagnostics
+        )
+    )
+
+    weather_continuous_regret = (
+        calculate_continuous_decision_regret(
+           weather_decision,
+           continuous_outcomes,
+        )
+    )
+
+    rule_continuous_regret = (
+        calculate_continuous_decision_regret(
+            rule_decision,
+            continuous_outcomes,
+        )
+    )
+
+    croplogic_continuous_regret = (
+        calculate_continuous_decision_regret(
+            croplogic_decision_name,
+            continuous_outcomes,
+        )
+    )
+
     best_actions, best_outcome = (
         determine_best_actions(
             action_outcomes
@@ -1523,6 +1610,27 @@ def run_single_date(
         "weather_only_regret": weather_regret,
         "rule_based_regret": rule_regret,
         "croplogic_regret": croplogic_regret,
+
+        # Continuous decision quality
+        "best_continuous_outcome": max(
+        continuous_outcomes.values()
+        ),
+
+        "sow_successful_day_ratio": continuous_outcomes[
+            "SOW TODAY"
+        ],
+
+        "wait_successful_day_ratio": continuous_outcomes[
+            "WAIT 5 DAYS"
+        ],
+
+        "switch_successful_day_ratio": continuous_outcomes[
+            "SWITCH TO SOYBEAN"
+        ],
+
+        "weather_continuous_regret": weather_continuous_regret,
+        "rule_continuous_regret": rule_continuous_regret,
+        "croplogic_continuous_regret": croplogic_continuous_regret,
 
         # CropLogic probability outputs
         "cotton_germ_prob": croplogic_result[
@@ -2136,6 +2244,56 @@ def print_report(results):
         f"{results['switch_to_soybean_outcome'].mean():.3f}"
     )
 
+    print("\nCONTINUOUS DECISION QUALITY")
+    print("----------------------------")
+
+    for action, column in [
+        (
+            "SOW TODAY",
+            "sow_successful_day_ratio",
+        ),
+        (
+            "WAIT 5 DAYS",
+            "wait_successful_day_ratio",
+        ),
+        (
+            "SWITCH TO SOYBEAN",
+            "switch_successful_day_ratio",
+        ),
+    ]:
+        print(
+            f"{action}: "
+            f"{results[column].mean():.3f}"
+        )
+
+    print("\nCONTINUOUS DECISION REGRET")
+    print("---------------------------")
+
+    print(
+        "Weather-only mean regret : "
+        f"{results['weather_continuous_regret'].mean():.3f}"
+    )
+
+    print(
+        "Rule-based mean regret   : "
+        f"{results['rule_continuous_regret'].mean():.3f}"
+    )
+
+    print(
+        "CropLogic mean regret    : "
+        f"{results['croplogic_continuous_regret'].mean():.3f}"
+    )
+
+    print(
+        "\nRegret = best realized successful-day ratio "
+        "minus the selected action's realized ratio."
+    )
+
+    print(
+        "The outcome is derived from the existing "
+        "crop-establishment model and is not field validation."
+    )
+
     # ------------------------------------------------------------------
     # Phase 2: continuous establishment diagnostics
     # ------------------------------------------------------------------
@@ -2237,6 +2395,16 @@ def print_report(results):
         "best_action_count",
         "croplogic_best_action",
         "croplogic_regret",
+
+        "best_continuous_outcome",
+
+        "sow_successful_day_ratio",
+        "wait_successful_day_ratio",
+        "switch_successful_day_ratio",
+
+        "weather_continuous_regret",
+        "rule_continuous_regret",
+        "croplogic_continuous_regret",
     ]
 
     print(
@@ -2347,353 +2515,6 @@ def print_report(results):
         "These results do not establish economic superiority "
         "or field-level impact."
     )
-
-
-
-    # -------------------------------------------------------------
-    # DECISION DISTRIBUTION
-    # -------------------------------------------------------------
-
-    print()
-    print("=" * 120)
-    print("DECISION DISTRIBUTION")
-    print("=" * 120)
-
-    for column, label in [
-        (
-            "weather_only_decision",
-            "WEATHER-ONLY",
-        ),
-        (
-            "rule_based_decision",
-            "RULE-BASED",
-        ),
-        (
-            "croplogic_decision",
-            "CROPLOGIC-SAATHI",
-        ),
-    ]:
-
-        print()
-        print(label)
-
-        counts = (
-            results[column]
-            .value_counts()
-        )
-
-        for decision in ACTIONS:
-            print(
-                f"  {decision:<20}: "
-                f"{int(counts.get(decision, 0))}"
-            )
-
-    # -------------------------------------------------------------
-    # OUTCOME PROXY
-    # -------------------------------------------------------------
-
-    print()
-    print("=" * 120)
-    print("HELD-OUT OUTCOME PROXY")
-    print("=" * 120)
-
-    weather_score = (
-        results["weather_only_outcome"]
-        .mean()
-    )
-
-    rule_score = (
-        results["rule_based_outcome"]
-        .mean()
-    )
-
-    croplogic_score = (
-        results["croplogic_outcome"]
-        .mean()
-    )
-
-    print(
-        f"Weather-only success proxy : "
-        f"{weather_score:.3f}"
-    )
-
-    print(
-        f"Rule-based success proxy   : "
-        f"{rule_score:.3f}"
-    )
-
-    print(
-        f"CropLogic success proxy    : "
-        f"{croplogic_score:.3f}"
-    )
-
-    # -------------------------------------------------------------
-    # BEST-ACTION RATE
-    # -------------------------------------------------------------
-
-    print()
-    print("=" * 120)
-    print("BEST-ACTION RATE")
-    print("=" * 120)
-
-    weather_best_rate = (
-        results["weather_only_best_action"]
-        .mean()
-    )
-
-    rule_best_rate = (
-        results["rule_based_best_action"]
-        .mean()
-    )
-
-    croplogic_best_rate = (
-        results["croplogic_best_action"]
-        .mean()
-    )
-
-    print(
-        f"Weather-only best-action rate : "
-        f"{weather_best_rate:.3f}"
-    )
-
-    print(
-        f"Rule-based best-action rate   : "
-        f"{rule_best_rate:.3f}"
-    )
-
-    print(
-        f"CropLogic best-action rate    : "
-        f"{croplogic_best_rate:.3f}"
-    )
-
-    # -------------------------------------------------------------
-    # BEST-ACTION TIE RATE
-    # -------------------------------------------------------------
-
-    tie_rate = (
-        results["best_action_count"] > 1
-    ).mean()
-
-    print()
-    print(
-        f"Best-action tie rate          : "
-        f"{tie_rate:.3f}"
-    )
-
-    print(
-        "A high tie rate means the binary outcome proxy "
-        "cannot strongly distinguish among actions."
-    )
-
-    # -------------------------------------------------------------
-    # REGRET
-    # -------------------------------------------------------------
-
-    print()
-    print("=" * 120)
-    print("REALIZED DECISION REGRET")
-    print("=" * 120)
-
-    weather_regret = (
-        results["weather_only_regret"]
-        .mean()
-    )
-
-    rule_regret = (
-        results["rule_based_regret"]
-        .mean()
-    )
-
-    croplogic_regret = (
-        results["croplogic_regret"]
-        .mean()
-    )
-
-    print(
-        f"Weather-only mean regret : "
-        f"{weather_regret:.3f}"
-    )
-
-    print(
-        f"Rule-based mean regret   : "
-        f"{rule_regret:.3f}"
-    )
-
-    print(
-        f"CropLogic mean regret    : "
-        f"{croplogic_regret:.3f}"
-    )
-
-    print()
-    print(
-        "Regret = best realized outcome "
-        "minus selected action outcome."
-    )
-
-    print(
-        "The current binary outcome proxy makes regret "
-        "0 or 1 only."
-    )
-
-    # -------------------------------------------------------------
-    # ACTION OUTCOME SUMMARY
-    # -------------------------------------------------------------
-
-    print()
-    print("=" * 120)
-    print("REALIZED OUTCOME BY ACTION")
-    print("=" * 120)
-
-    print(
-        f"SOW TODAY success rate       : "
-        f"{results['sow_today_outcome'].mean():.3f}"
-    )
-
-    print(
-        f"WAIT 5 DAYS success rate     : "
-        f"{results['wait_5_days_outcome'].mean():.3f}"
-    )
-
-    print(
-        f"SWITCH TO SOYBEAN rate       : "
-        f"{results['switch_to_soybean_outcome'].mean():.3f}"
-    )
-
-    # -------------------------------------------------------------
-    # PROBABILITY SUMMARY
-    # -------------------------------------------------------------
-
-    print()
-    print("=" * 120)
-    print("CROPLOGIC PROBABILITY SUMMARY")
-    print("=" * 120)
-
-    print(
-        f"Mean cotton establishment probability : "
-        f"{results['cotton_germ_prob'].mean():.3f}"
-    )
-
-    print(
-        f"Mean wait establishment probability   : "
-        f"{results['wait_germ_prob'].mean():.3f}"
-    )
-
-    print(
-        f"Mean soybean establishment probability: "
-        f"{results['soybean_germ_prob'].mean():.3f}"
-    )
-
-    # -------------------------------------------------------------
-    # DECISION AGREEMENT
-    # -------------------------------------------------------------
-
-    print()
-    print("=" * 120)
-    print("DECISION AGREEMENT")
-    print("=" * 120)
-
-    weather_crop_logic_agreement = (
-        results["weather_only_decision"]
-        == results["croplogic_decision"]
-    ).mean()
-
-    rule_crop_logic_agreement = (
-        results["rule_based_decision"]
-        == results["croplogic_decision"]
-    ).mean()
-
-    print(
-        f"Weather-only vs CropLogic agreement : "
-        f"{weather_crop_logic_agreement:.3f}"
-    )
-
-    print(
-        f"Rule-based vs CropLogic agreement   : "
-        f"{rule_crop_logic_agreement:.3f}"
-    )
-
-    # -------------------------------------------------------------
-    # INTERPRETATION
-    # -------------------------------------------------------------
-
-    print()
-    print("=" * 120)
-    print("INTERPRETATION")
-    print("=" * 120)
-
-    print(
-        "The primary validation population is restricted to the "
-        "documented optimal sowing window for the target crop."
-    )
-
-    print(
-        "The optimal sowing window is used as a validation-date "
-        "eligibility rule, not as a hard biological failure cutoff."
-    )
-
-    print(
-        "All decision methods receive only observations strictly "
-        "before each historical decision date."
-    )
-
-    print(
-        "The 14-day evaluation period begins on the day AFTER "
-        "the decision date."
-    )
-
-    print(
-        "Future rainfall is therefore held out from the decision "
-        "and used only after the decision is generated."
-    )
-
-    print(
-        "The weather-only and rule-based approaches are intentionally "
-        "simple baselines."
-    )
-
-    print(
-        "For each date, all three possible actions are evaluated "
-        "against the same held-out rainfall trajectory."
-    )
-
-    print(
-        "The realized outcome is a simplified model-based "
-        "establishment proxy."
-    )
-
-    print(
-        "It is not field-measured establishment and should not "
-        "be interpreted as causal or agronomic impact evidence."
-    )
-
-    print(
-        "Best-action rate must be interpreted together with the "
-        "best-action tie rate because the current outcome is binary."
-    )
-
-    print(
-        "A high best-action rate with many ties does not demonstrate "
-        "that one decision method is substantially more accurate."
-    )
-
-    print(
-        "The current validation does not establish economic superiority."
-    )
-
-    print(
-        "The next validation stage should evaluate probability "
-        "calibration and a more informative decision/economic "
-        "outcome metric before making strong performance claims."
-    )
-
-    # -------------------------------------------------------------
-    # PROBABILITY CALIBRATION
-    # -------------------------------------------------------------
-
-    print_probability_calibration(
-        results
-    )
-
 
 # ---------------------------------------------------------------------
 # MAIN
