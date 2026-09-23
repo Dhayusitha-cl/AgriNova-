@@ -1,8 +1,9 @@
 import pandas as pd
 import pytest
 
+from src.rainfall_states import classify_rainfall
+
 from src.rainfall_preprocessing import (
-    classify_rainfall,
     validate_rainfall,
     validate_daily_rainfall_observations,
     add_rainfall_state,

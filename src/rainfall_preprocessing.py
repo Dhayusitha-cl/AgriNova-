@@ -10,9 +10,10 @@ It does not perform weather simulation or decision making.
 
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import xarray as xr
+
+from src.rainfall_states import classify_rainfall
 
 
 def load_daily_rainfall(

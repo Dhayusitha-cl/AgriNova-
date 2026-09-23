@@ -23,7 +23,7 @@ from .monte_carlo_weather import (
 from .soil_water import simulate_soil_water
 from .crop_establishment import evaluate_establishment
 from .economic_engine import compare_all_decisions
-from .rainfall_preprocessing import classify_rainfall
+from .rainfall_states import classify_rainfall
 
 def _validate_inputs(
     crop_name,

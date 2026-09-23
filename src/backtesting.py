@@ -13,10 +13,8 @@ This prevents future-data leakage.
 import pandas as pd
 import numpy as np
 
-from src.rainfall_preprocessing import (
-    classify_rainfall,
-    validate_daily_rainfall_observations,
-)
+from src.rainfall_states import classify_rainfall
+from src.rainfall_preprocessing import validate_daily_rainfall_observations
 
 def validate_rainfall_dataframe(dataframe):
     """
