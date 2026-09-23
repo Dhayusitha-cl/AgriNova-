@@ -148,3 +148,24 @@ def test_unexpected_decision_error_returns_500(monkeypatch):
     assert response.json()["detail"] == (
         "Internal server error while processing the decision."
     )
+
+def test_decision_success_with_production_calibration():
+    payload = valid_payload()
+
+    payload.pop("transition_matrix")
+    payload["start_date"] = "2024-06-15"
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert "decision" in data
+    assert "economic_comparison" in data
+    assert "germ_prob_today" in data
+    assert "germ_prob_wait" in data
+    assert "germ_prob_soybean" in data

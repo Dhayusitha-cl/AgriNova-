@@ -25,6 +25,8 @@ from .crop_establishment import evaluate_establishment
 from .economic_engine import compare_all_decisions
 from .rainfall_states import classify_rainfall
 
+from .calibration_artifact import CalibrationArtifact
+
 def _validate_inputs(
     crop_name,
     soil_type,
@@ -432,6 +434,7 @@ def make_decision(
     start_date=None,
     rainfall_data=None,
     initial_state=None,
+    calibration_artifact=None,
 ):
     """
     Generate a probabilistic pre-sowing decision.
@@ -513,6 +516,7 @@ def make_decision(
             initial_state=initial_state,
             random_seed=random_seed,
             rainfall_data=rainfall_data,
+            calibration_artifact=calibration_artifact,
         )
     else:
         if transition_matrix is None:
@@ -566,6 +570,7 @@ def make_decision(
             initial_state=initial_state,
             random_seed=random_seed + 1,
             rainfall_data=rainfall_data,
+            calibration_artifact=calibration_artifact,
         )
     else:
         wait_scenarios = generate_monte_carlo_scenarios(

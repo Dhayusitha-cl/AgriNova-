@@ -8,12 +8,18 @@ logger = logging.getLogger("croplogic_saathi")
 from src.crop_data import crops
 from src.soil_data import soils
 from src.decision_engine import make_decision
-
+from src.calibration_registry import get_calibration_artifact
 
 app = FastAPI(
     title="CropLogic-Saathi API",
     version="1.0.0",
     description="API for the CropLogic-Saathi pre-sowing decision engine",
+)
+
+PRODUCTION_CALIBRATION_LOCATION = "yavatmal"
+
+CALIBRATION_ARTIFACT = get_calibration_artifact(
+    PRODUCTION_CALIBRATION_LOCATION
 )
 
 
@@ -188,6 +194,7 @@ def decision(request: DecisionRequest):
                 if request.start_date is not None
                 else None
             ),
+            calibration_artifact=CALIBRATION_ARTIFACT,
         )
 
     except ValueError as exc:

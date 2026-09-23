@@ -11,6 +11,7 @@ Simulation outputs are scenarios, not forecasts or guarantees.
 import numpy as np
 
 from src.weather_simulator import generate_rainfall_scenario
+from src.calibration_artifact import CalibrationArtifact
 
 def generate_calibrated_monte_carlo_scenarios(
     start_date,
@@ -19,6 +20,7 @@ def generate_calibrated_monte_carlo_scenarios(
     initial_state="dry",
     random_seed=None,
     rainfall_data=None,
+    calibration_artifact=None,
 ):
     """
     Generate multiple rainfall scenarios using calibrated
@@ -59,56 +61,81 @@ def generate_calibrated_monte_carlo_scenarios(
 
     simulation_start = pd.Timestamp(start_date)
 
+        # ---------------------------------------------------------
+    # CALIBRATION INPUTS
     # ---------------------------------------------------------
-    # CALIBRATION: perform expensive historical processing ONCE
+    # Production callers can provide a prebuilt calibration
+    # artifact. The existing rainfall_data path is retained
+    # for backward compatibility and development use.
     # ---------------------------------------------------------
 
-    if rainfall_data is None:
-        rainfall_data = load_processed_rainfall()
-
-    fallback_matrix = calculate_transition_matrix(
-        rainfall_data
-    )
-
-    monthly_matrices = {}
-
-    for month in range(1, 13):
-        monthly_matrices[month] = (
-            get_monthly_transition_matrix_with_fallback(
-                rainfall_data,
-                month=month,
-                fallback_matrix=fallback_matrix,
+    if calibration_artifact is not None:
+        if not isinstance(
+            calibration_artifact,
+            CalibrationArtifact,
+        ):
+            raise TypeError(
+                "calibration_artifact must be a "
+                "CalibrationArtifact instance."
             )
+
+        calibration_artifact.validate()
+
+        monthly_matrices = (
+            calibration_artifact.monthly_transition_matrices
         )
 
-    # Pre-group observed rainfall amounts by month and state.
-    rainfall_samples = {}
+        rainfall_samples = (
+            calibration_artifact.rainfall_samples
+        )
 
-    for month in range(1, 13):
-        month_data = rainfall_data[
-            rainfall_data["date"].dt.month == month
-        ]
+    else:
+        if rainfall_data is None:
+            rainfall_data = load_processed_rainfall()
 
-        for state in ["dry", "drizzle", "rain"]:
+        fallback_matrix = calculate_transition_matrix(
+            rainfall_data
+        )
 
-            values = month_data.loc[
-                month_data["rainfall_state"] == state,
-                "rainfall_mm",
-            ].to_numpy(dtype=float)
+        monthly_matrices = {}
 
-            if len(values) == 0:
-                values = rainfall_data.loc[
-                    rainfall_data["rainfall_state"] == state,
+        for month in range(1, 13):
+            monthly_matrices[month] = (
+                get_monthly_transition_matrix_with_fallback(
+                    rainfall_data,
+                    month=month,
+                    fallback_matrix=fallback_matrix,
+                )
+            )
+
+        # Pre-group observed rainfall amounts by month and state.
+        rainfall_samples = {}
+
+        for month in range(1, 13):
+            month_data = rainfall_data[
+                rainfall_data["date"].dt.month == month
+            ]
+
+            for state in ["dry", "drizzle", "rain"]:
+
+                values = month_data.loc[
+                    month_data["rainfall_state"] == state,
                     "rainfall_mm",
                 ].to_numpy(dtype=float)
 
-            if len(values) == 0:
-                raise ValueError(
-                    f"No rainfall observations found for "
-                    f"state '{state}'."
-                )
+                if len(values) == 0:
+                    values = rainfall_data.loc[
+                        rainfall_data["rainfall_state"] == state,
+                        "rainfall_mm",
+                    ].to_numpy(dtype=float)
 
-            rainfall_samples[(month, state)] = values
+                if len(values) == 0:
+                    raise ValueError(
+                        f"No rainfall observations found for "
+                        f"state '{state}'."
+                    )
+
+                rainfall_samples[(month, state)] = values
 
     # ---------------------------------------------------------
     # MONTE CARLO
