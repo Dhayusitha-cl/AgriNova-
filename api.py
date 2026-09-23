@@ -34,7 +34,7 @@ class DecisionRequest(BaseModel):
     rainfall_yesterday_mm: float = Field(ge=0, le=1000)
     transition_matrix: list[list[float]] | None = None
     start_date: date | None = None
-    num_simulations: int = Field(default=500, ge=0, le=10000)
+    num_simulations: int = Field(default=500, ge=1, le=10000)
     days_to_simulate: int = Field(default=7, ge=1, le=30)
 
 
