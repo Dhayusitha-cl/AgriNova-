@@ -16,18 +16,12 @@ app = FastAPI(
     description="API for the CropLogic-Saathi pre-sowing decision engine",
 )
 
-PRODUCTION_CALIBRATION_LOCATION = "yavatmal"
-
-CALIBRATION_ARTIFACT = get_calibration_artifact(
-    PRODUCTION_CALIBRATION_LOCATION
-)
-
-
 # ---------------------------------------------------------
 # REQUEST MODEL
 # ---------------------------------------------------------
 
 class DecisionRequest(BaseModel):
+    location_id: str = Field(min_length=1, max_length=100)
     crop_name: str = Field(min_length=1, max_length=50)
     soil_type: str = Field(min_length=1, max_length=50)
     current_moisture_mm: float = Field(ge=0, le=500)
@@ -181,6 +175,19 @@ def decision(request: DecisionRequest):
             request.days_to_simulate,
         )
 
+        calibration_artifact = None
+
+        if request.transition_matrix is None:
+            try:
+                calibration_artifact = get_calibration_artifact(
+                    request.location_id
+                )
+            except (ValueError, FileNotFoundError) as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=str(exc),
+                ) from exc
+
         result = make_decision(
             crop_name=request.crop_name,
             soil_type=request.soil_type,
@@ -194,8 +201,11 @@ def decision(request: DecisionRequest):
                 if request.start_date is not None
                 else None
             ),
-            calibration_artifact=CALIBRATION_ARTIFACT,
+            calibration_artifact=calibration_artifact,
         )
+
+    except HTTPException:
+        raise
 
     except ValueError as exc:
         logger.warning("Decision validation error: %s", exc)

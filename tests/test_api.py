@@ -9,6 +9,7 @@ client = TestClient(app)
 def valid_payload():
     return {
         "crop_name": "cotton",
+        "location_id": "yavatmal",
         "soil_type": "medium_black",
         "current_moisture_mm": 35.0,
         "rainfall_yesterday_mm": 12.0,
@@ -169,3 +170,25 @@ def test_decision_success_with_production_calibration():
     assert "germ_prob_today" in data
     assert "germ_prob_wait" in data
     assert "germ_prob_soybean" in data
+
+def test_decision_rejects_unknown_location():
+    payload = valid_payload()
+    payload.pop("transition_matrix")
+    payload["start_date"] = "2024-06-15"
+    payload["location_id"] = "unknown_location"
+
+    response = client.post("/api/v1/decision", json=payload)
+
+    assert response.status_code == 400
+    assert "No calibration artifact is configured" in response.json()["detail"]
+
+
+def test_decision_requires_location_for_production_calibration():
+    payload = valid_payload()
+    payload.pop("transition_matrix")
+    payload["start_date"] = "2024-06-15"
+    payload.pop("location_id")
+
+    response = client.post("/api/v1/decision", json=payload)
+
+    assert response.status_code == 422
