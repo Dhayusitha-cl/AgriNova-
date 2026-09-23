@@ -64,6 +64,28 @@ def test_decision_success():
     assert data["days_to_simulate"] == 7
     assert isinstance(data["assumptions"], dict)
 
+def test_decision_response_schema():
+    response = client.post(
+        "/api/v1/decision",
+        json=valid_payload(),
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert isinstance(data["decision"], str)
+    assert isinstance(data["germ_prob_today"], float)
+    assert isinstance(data["germ_prob_wait"], float)
+    assert isinstance(data["germ_prob_soybean"], float)
+    assert isinstance(data["confidence"], float)
+
+    assert isinstance(data["soil_moisture_today"], dict)
+    assert isinstance(data["soil_moisture_wait"], dict)
+
+    assert set(data["soil_moisture_today"]) == {"mean", "min", "max"}
+    assert set(data["soil_moisture_wait"]) == {"mean", "min", "max"}
+
 
 def test_invalid_crop():
     payload = valid_payload()

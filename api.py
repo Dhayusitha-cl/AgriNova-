@@ -31,6 +31,27 @@ class DecisionRequest(BaseModel):
     num_simulations: int = Field(default=500, ge=1, le=10000)
     days_to_simulate: int = Field(default=7, ge=1, le=30)
 
+class MoistureSummary(BaseModel):
+    mean: list[float]
+    min: list[float]
+    max: list[float]
+
+
+class DecisionResponse(BaseModel):
+    decision: str
+    economic_comparison: dict
+    germ_prob_today: float
+    germ_prob_wait: float
+    germ_prob_soybean: float
+    confidence: float
+    current_moisture: float
+    min_moisture_required: float
+    initial_rainfall_state: str
+    num_simulations: int
+    days_to_simulate: int
+    assumptions: dict
+    soil_moisture_today: MoistureSummary
+    soil_moisture_wait: MoistureSummary
 
 # ---------------------------------------------------------
 # API 1 — HEALTH CHECK
@@ -108,7 +129,10 @@ def get_soil(soil_type: str):
 # API 6 — SOWING DECISION
 # ---------------------------------------------------------
 
-@app.post("/api/v1/decision")
+@app.post(
+    "/api/v1/decision",
+    response_model=DecisionResponse,
+)
 def decision(request: DecisionRequest):
 
     # -----------------------------------------------------
