@@ -1,0 +1,6 @@
+﻿-r requirements.txt
+xarray==2023.5.0
+pytest==9.1.1
+httpx==0.28.1
+streamlit==1.28.0
+matplotlib==3.7.1
