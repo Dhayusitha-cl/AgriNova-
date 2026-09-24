@@ -1,13 +1,14 @@
-from pathlib import Path
+from importlib.resources import files
 
 from src.calibration_artifact import CalibrationArtifact
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-CALIBRATION_DIR = BASE_DIR / "data" / "calibration"
-
 CALIBRATION_ARTIFACTS = {
-    "yavatmal": CALIBRATION_DIR / "yavatmal_rainfall_calibration_v1.json",
+    "yavatmal": (
+        files("data")
+        / "calibration"
+        / "yavatmal_rainfall_calibration_v1.json"
+    ),
 }
 
 

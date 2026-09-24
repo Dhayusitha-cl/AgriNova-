@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "croplogic-saathi"
+version = "0.1.0"
+description = "Probabilistic pre-sowing decision engine for rainfed agriculture"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.24,<2",
+    "pandas>=2,<3",
+    "pydantic>=2.12,<3",
+]
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = ["croplogic_saathi*", "src*", "data*"]
+
+[tool.setuptools.package-data]
+data = ["calibration/*.json"]
