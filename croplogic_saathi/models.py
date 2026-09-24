@@ -1,3 +1,5 @@
+from datetime import date
+
 from pydantic import BaseModel
 
 
@@ -28,6 +30,19 @@ class Assumptions(BaseModel):
     simulation_note: str
 
 
+class DecisionTrace(BaseModel):
+    location_id: str
+    calibration_schema_version: str | None
+    calibration_artifact_type: str | None
+    start_date: date | None
+    random_seed: int
+    num_simulations: int
+    days_to_simulate: int
+    initial_rainfall_state: str
+    crop_name: str
+    soil_type: str
+
+
 class DecisionResult(BaseModel):
     decision: str
     economic_comparison: EconomicComparison
@@ -40,4 +55,5 @@ class DecisionResult(BaseModel):
     initial_rainfall_state: str
     num_simulations: int
     days_to_simulate: int
+    trace: DecisionTrace
     assumptions: Assumptions

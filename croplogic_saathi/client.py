@@ -5,7 +5,8 @@ from pydantic import BaseModel, Field
 from src.calibration_registry import get_calibration_artifact
 from src.decision_engine import make_decision
 
-from .models import DecisionResult
+from src.calibration_artifact import ARTIFACT_SCHEMA_VERSION
+from .models import DecisionResult, DecisionTrace
 
 
 class _DecisionRequest(BaseModel):
@@ -17,6 +18,11 @@ class _DecisionRequest(BaseModel):
     start_date: date | None = None
     num_simulations: int = Field(default=500, ge=1, le=10000)
     days_to_simulate: int = Field(default=7, ge=1, le=30)
+    random_seed: int = Field(
+        default=42,
+        ge=0,
+        le=2**31 - 1,
+    )
 
 
 class CropLogicClient:
@@ -32,6 +38,7 @@ class CropLogicClient:
         rainfall_yesterday_mm: float,
         start_date: str | None = None,
         num_simulations: int = 500,
+        random_seed: int = 42,
         days_to_simulate: int = 7,
     ) -> DecisionResult:
         request = _DecisionRequest(
@@ -43,6 +50,7 @@ class CropLogicClient:
             start_date=start_date,
             num_simulations=num_simulations,
             days_to_simulate=days_to_simulate,
+            random_seed=random_seed,
         )
 
         calibration_artifact = get_calibration_artifact(
@@ -56,6 +64,7 @@ class CropLogicClient:
             rainfall_yesterday_mm=request.rainfall_yesterday_mm,
             transition_matrix=None,
             num_simulations=request.num_simulations,
+            random_seed=request.random_seed,
             days_to_simulate=request.days_to_simulate,
             start_date=(
                 request.start_date.isoformat()
@@ -64,6 +73,21 @@ class CropLogicClient:
             ),
             calibration_artifact=calibration_artifact,
         )
+
+        trace = DecisionTrace(
+            location_id=request.location_id,
+            calibration_schema_version=ARTIFACT_SCHEMA_VERSION,
+            calibration_artifact_type="rainfall_calibration",
+            start_date=request.start_date,
+            random_seed=request.random_seed,
+            num_simulations=request.num_simulations,
+            days_to_simulate=request.days_to_simulate,
+            initial_rainfall_state=result["initial_rainfall_state"],
+            crop_name=request.crop_name,
+            soil_type=request.soil_type,
+        )
+
+        result["trace"] = trace
 
         return DecisionResult.model_validate(
             {

@@ -3,6 +3,9 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from datetime import date
 
+from src.calibration_artifact import ARTIFACT_SCHEMA_VERSION
+from croplogic_saathi.models import DecisionTrace
+
 logger = logging.getLogger("croplogic_saathi")
 
 from src.crop_data import crops
@@ -15,6 +18,19 @@ app = FastAPI(
     version="1.0.0",
     description="API for the CropLogic-Saathi pre-sowing decision engine",
 )
+
+def _api_error(
+    status_code: int,
+    code: str,
+    message: str,
+) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "code": code,
+            "message": message,
+        },
+    )
 
 # ---------------------------------------------------------
 # REQUEST MODEL
@@ -30,6 +46,11 @@ class DecisionRequest(BaseModel):
     start_date: date | None = None
     num_simulations: int = Field(default=500, ge=1, le=10000)
     days_to_simulate: int = Field(default=7, ge=1, le=30)
+    random_seed: int = Field(
+        default=42,
+        ge=0,
+        le=2**31 - 1,
+    )
 
 class MoistureSummary(BaseModel):
     mean: list[float]
@@ -78,6 +99,7 @@ class DecisionResponse(BaseModel):
     assumptions: Assumptions
     soil_moisture_today: MoistureSummary
     soil_moisture_wait: MoistureSummary
+    trace: DecisionTrace
 
 # ---------------------------------------------------------
 # API 1 — HEALTH CHECK
@@ -121,9 +143,10 @@ def get_soils():
 def get_crop(crop_name: str):
 
     if crop_name not in crops:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Unknown crop: {crop_name}",
+        raise _api_error(
+            404,
+            "UNKNOWN_CROP",
+            f"Unknown crop: {crop_name}",
         )
 
     return {
@@ -140,9 +163,10 @@ def get_crop(crop_name: str):
 def get_soil(soil_type: str):
 
     if soil_type not in soils:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Unknown soil type: {soil_type}",
+        raise _api_error(
+            404,
+            "UNKNOWN_SOIL",
+            f"Unknown soil type: {soil_type}",
         )
 
     return {
@@ -166,50 +190,57 @@ def decision(request: DecisionRequest):
     # -----------------------------------------------------
 
     if request.crop_name not in crops:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown crop: {request.crop_name}",
+        raise _api_error(
+            400,
+            "UNKNOWN_CROP",
+            f"Unknown crop: {request.crop_name}",
         )
 
     if request.soil_type not in soils:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown soil type: {request.soil_type}",
+        raise _api_error(
+            400,
+            "UNKNOWN_SOIL",
+            f"Unknown soil type: {request.soil_type}",
         )
 
     if request.transition_matrix is not None:
 
         if len(request.transition_matrix) != 3:
-            raise HTTPException(
-                status_code=400,
-                detail="Transition matrix must contain 3 rows.",
+            raise _api_error(
+                400,
+                "INVALID_TRANSITION_MATRIX",
+                "Transition matrix must contain 3 rows.",
             )
 
         for row in request.transition_matrix:
 
             if len(row) != 3:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Each transition matrix row must contain 3 values.",
+                raise _api_error(
+                    400,
+                    "INVALID_TRANSITION_MATRIX",
+                    "Each transition matrix row must contain 3 values."
                 )
 
             if any(value < 0 or value > 1 for value in row):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Transition probabilities must be between 0 and 1.",
+                raise _api_error(
+                    400,
+                    "INVALID_TRANSITION_MATRIX",
+                    "Transition probabilities must be between 0 and 1."
                 )
 
-            if abs(sum(row) - 1.0) > 0.01:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Each transition matrix row must sum approximately to 1.",
+            if abs(sum(row) - 1.0) > 1e-5:
+                raise _api_error(
+                    400,
+                    "INVALID_TRANSITION_MATRIX",
+                    "Each transition matrix row must sum approximately to 1.",
                 )
 
     elif request.start_date is None:
 
-        raise HTTPException(
-            status_code=400,
-            detail="Either transition_matrix or start_date must be provided.",
+        raise _api_error(
+            400,
+            "MISSING_START_DATE",
+            "Either transition_matrix or start_date must be provided.",
         )
 
     # -----------------------------------------------------
@@ -218,11 +249,13 @@ def decision(request: DecisionRequest):
 
     try:
         logger.info(
-            "Decision request: crop=%s soil=%s simulations=%d days=%d",
+            "Decision request: location=%s crop=%s soil=%s simulations=%d days=%d seed=%d",
+            request.location_id,
             request.crop_name,
             request.soil_type,
             request.num_simulations,
             request.days_to_simulate,
+            request.random_seed,
         )
 
         calibration_artifact = None
@@ -233,9 +266,10 @@ def decision(request: DecisionRequest):
                     request.location_id
                 )
             except (ValueError, FileNotFoundError) as exc:
-                raise HTTPException(
-                    status_code=400,
-                    detail=str(exc),
+                raise _api_error(
+                    400,
+                    "CALIBRATION_UNAVAILABLE",
+                    str(exc),
                 ) from exc
 
         result = make_decision(
@@ -246,6 +280,7 @@ def decision(request: DecisionRequest):
             transition_matrix=request.transition_matrix,
             num_simulations=request.num_simulations,
             days_to_simulate=request.days_to_simulate,
+            random_seed=request.random_seed,
             start_date=(
                 request.start_date.isoformat()
                 if request.start_date is not None
@@ -254,20 +289,43 @@ def decision(request: DecisionRequest):
             calibration_artifact=calibration_artifact,
         )
 
+        trace = DecisionTrace(
+            location_id=request.location_id,
+            calibration_schema_version=(
+                ARTIFACT_SCHEMA_VERSION
+                if calibration_artifact is not None
+                else None
+            ),
+            calibration_artifact_type=(
+                "rainfall_calibration"
+                if calibration_artifact is not None
+                else None
+            ),
+            start_date=request.start_date,
+            random_seed=request.random_seed,
+            num_simulations=request.num_simulations,
+            days_to_simulate=request.days_to_simulate,
+            initial_rainfall_state=result["initial_rainfall_state"],
+            crop_name=request.crop_name,
+            soil_type=request.soil_type,
+        )
+
     except HTTPException:
         raise
 
     except ValueError as exc:
         logger.warning("Decision validation error: %s", exc)
-        raise HTTPException(
-            status_code=400,
-            detail=str(exc),
+        raise _api_error(
+            400,
+            "DECISION_VALIDATION_ERROR",
+            str(exc),
         ) from exc
     except Exception:
         logger.exception("Unexpected error while processing decision request")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error while processing the decision.",
+        raise _api_error(
+            500,
+            "INTERNAL_ERROR",
+            "Internal server error while processing the decision.",
         )
 
     # -----------------------------------------------------
@@ -294,6 +352,7 @@ def decision(request: DecisionRequest):
         "num_simulations": result["num_simulations"],
         "days_to_simulate": result["days_to_simulate"],
         "assumptions": result["assumptions"],
+        "trace": trace,
 
         "soil_moisture_today": {
             "mean": trajectories.mean(axis=0).tolist(),

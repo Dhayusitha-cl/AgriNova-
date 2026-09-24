@@ -153,7 +153,10 @@ def test_rounded_transition_matrix_returns_400():
     )
 
     assert response.status_code == 400
-    assert "transition" in response.json()["detail"].lower()
+    detail = response.json()["detail"]
+
+    assert detail["code"] == "INVALID_TRANSITION_MATRIX"
+    assert "transition" in detail["message"].lower()
 
 
 def test_unexpected_decision_error_returns_500(monkeypatch):
@@ -168,9 +171,10 @@ def test_unexpected_decision_error_returns_500(monkeypatch):
     )
 
     assert response.status_code == 500
-    assert response.json()["detail"] == (
-        "Internal server error while processing the decision."
-    )
+    assert response.json()["detail"] == {
+        "code": "INTERNAL_ERROR",
+        "message": "Internal server error while processing the decision.",
+    }
 
 def test_decision_success_with_production_calibration():
     payload = valid_payload()
@@ -202,7 +206,10 @@ def test_decision_rejects_unknown_location():
     response = client.post("/api/v1/decision", json=payload)
 
     assert response.status_code == 400
-    assert "No calibration artifact is configured" in response.json()["detail"]
+    detail = response.json()["detail"]
+
+    assert detail["code"] == "CALIBRATION_UNAVAILABLE"
+    assert "No calibration artifact is configured" in detail["message"]
 
 
 def test_decision_requires_location_for_production_calibration():
@@ -280,3 +287,68 @@ def test_decision_probability_fields_are_bounded():
         "confidence",
     ):
         assert 0.0 <= body[field] <= 1.0
+
+def test_invalid_crop():
+    payload = valid_payload()
+    payload["crop_name"] = "banana"
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "code": "UNKNOWN_CROP",
+        "message": "Unknown crop: banana",
+    }
+
+def test_invalid_soil():
+    payload = valid_payload()
+    payload["soil_type"] = "unknown_soil"
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "code": "UNKNOWN_SOIL",
+        "message": "Unknown soil type: unknown_soil",
+    }
+
+def test_invalid_transition_matrix():
+    payload = valid_payload()
+
+    payload["transition_matrix"] = [
+        [0.5, 0.2, 0.1],
+        [0.55, 0.30, 0.15],
+        [0.40, 0.35, 0.25],
+    ]
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == (
+        "INVALID_TRANSITION_MATRIX"
+    )
+
+def test_decision_requires_start_date_without_transition_matrix():
+    payload = valid_payload()
+    payload.pop("transition_matrix")
+    payload.pop("start_date", None)
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "code": "MISSING_START_DATE",
+        "message": "Either transition_matrix or start_date must be provided.",
+    }
