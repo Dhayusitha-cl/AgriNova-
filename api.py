@@ -37,9 +37,35 @@ class MoistureSummary(BaseModel):
     max: list[float]
 
 
+class EconomicOutcome(BaseModel):
+    decision: str
+    expected_profit: float
+    success_probability: float
+    best_case_profit: float
+    worst_case_profit: float
+    risk_level: str
+    advantage_over_others: float
+
+
+class EconomicComparison(BaseModel):
+    sow_today: EconomicOutcome
+    wait: EconomicOutcome
+    switch: EconomicOutcome
+    best_decision: str
+    best_profit: float
+    all_decisions: list[EconomicOutcome]
+
+
+class Assumptions(BaseModel):
+    daily_et_mm: float
+    wait_days: int
+    economic_decision_policy: str
+    confidence_definition: str
+    simulation_note: str
+
 class DecisionResponse(BaseModel):
     decision: str
-    economic_comparison: dict
+    economic_comparison: EconomicComparison
     germ_prob_today: float
     germ_prob_wait: float
     germ_prob_soybean: float
@@ -49,7 +75,7 @@ class DecisionResponse(BaseModel):
     initial_rainfall_state: str
     num_simulations: int
     days_to_simulate: int
-    assumptions: dict
+    assumptions: Assumptions
     soil_moisture_today: MoistureSummary
     soil_moisture_wait: MoistureSummary
 

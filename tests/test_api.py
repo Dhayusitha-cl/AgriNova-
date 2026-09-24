@@ -214,3 +214,69 @@ def test_decision_requires_location_for_production_calibration():
     response = client.post("/api/v1/decision", json=payload)
 
     assert response.status_code == 422
+
+def test_decision_economic_comparison_contract():
+    response = client.post("/api/v1/decision", json=valid_payload())
+
+    assert response.status_code == 200
+
+    economic = response.json()["economic_comparison"]
+
+    assert set(economic) == {
+        "sow_today",
+        "wait",
+        "switch",
+        "best_decision",
+        "best_profit",
+        "all_decisions",
+    }
+
+    for key in ("sow_today", "wait", "switch"):
+        outcome = economic[key]
+
+        assert set(outcome) == {
+            "decision",
+            "expected_profit",
+            "success_probability",
+            "best_case_profit",
+            "worst_case_profit",
+            "risk_level",
+            "advantage_over_others",
+        }
+
+        assert 0.0 <= outcome["success_probability"] <= 1.0
+
+
+def test_decision_assumptions_contract():
+    response = client.post("/api/v1/decision", json=valid_payload())
+
+    assert response.status_code == 200
+
+    assumptions = response.json()["assumptions"]
+
+    assert set(assumptions) == {
+        "daily_et_mm",
+        "wait_days",
+        "economic_decision_policy",
+        "confidence_definition",
+        "simulation_note",
+    }
+
+    assert assumptions["daily_et_mm"] > 0
+    assert assumptions["wait_days"] > 0
+
+
+def test_decision_probability_fields_are_bounded():
+    response = client.post("/api/v1/decision", json=valid_payload())
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    for field in (
+        "germ_prob_today",
+        "germ_prob_wait",
+        "germ_prob_soybean",
+        "confidence",
+    ):
+        assert 0.0 <= body[field] <= 1.0
