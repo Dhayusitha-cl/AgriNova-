@@ -301,6 +301,11 @@ def decision(request: DecisionRequest):
                 if calibration_artifact is not None
                 else None
             ),
+            calibration_artifact_id=(
+                calibration_artifact.content_hash()
+                if calibration_artifact is not None
+                else None
+            ),
             start_date=request.start_date,
             random_seed=request.random_seed,
             num_simulations=request.num_simulations,

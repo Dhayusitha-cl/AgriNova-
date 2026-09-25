@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import hashlib
 import json
 
 import numpy as np
@@ -58,6 +59,24 @@ class CalibrationArtifact:
     monthly_transition_matrices: dict[int, np.ndarray]
     rainfall_samples: dict[tuple[int, str], np.ndarray]
     fallback_transition_matrix: np.ndarray
+
+    def content_hash(self) -> str:
+        """
+        Return a deterministic SHA-256 identity for this artifact's content.
+
+        The hash excludes the artifact identity itself so the identity
+        can be verified after loading.
+        """
+        payload = self.to_dict()
+
+        canonical = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+
+        return hashlib.sha256(canonical).hexdigest()
 
     def validate(self) -> None:
         """Validate artifact structure before use."""

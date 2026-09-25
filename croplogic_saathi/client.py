@@ -78,6 +78,7 @@ class CropLogicClient:
             location_id=request.location_id,
             calibration_schema_version=ARTIFACT_SCHEMA_VERSION,
             calibration_artifact_type="rainfall_calibration",
+            calibration_artifact_id=calibration_artifact.content_hash(),
             start_date=request.start_date,
             random_seed=request.random_seed,
             num_simulations=request.num_simulations,

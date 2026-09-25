@@ -34,6 +34,7 @@ class DecisionTrace(BaseModel):
     location_id: str
     calibration_schema_version: str | None
     calibration_artifact_type: str | None
+    calibration_artifact_id: str | None
     start_date: date | None
     random_seed: int
     num_simulations: int
