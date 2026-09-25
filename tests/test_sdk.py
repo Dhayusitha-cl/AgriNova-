@@ -81,6 +81,7 @@ def test_sdk_rejects_empty_location():
             crop_name="cotton",
             soil_type="medium_black",
             current_moisture_mm=35.0,
+            start_date="2024-06-15",
             rainfall_yesterday_mm=12.0,
         )
 
@@ -253,4 +254,14 @@ def test_rejects_excessive_simulation_horizon():
             rainfall_yesterday_mm=10,
             start_date="2024-06-15",
             days_to_simulate=31,
+        )
+
+def test_sdk_rejects_missing_start_date():
+    with pytest.raises(TypeError, match="start_date"):
+        CropLogicClient().assess_sowing(
+            location_id="yavatmal",
+            crop_name="cotton",
+            soil_type="medium_black",
+            current_moisture_mm=35.0,
+            rainfall_yesterday_mm=12.0,
         )

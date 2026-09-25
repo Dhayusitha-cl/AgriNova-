@@ -15,7 +15,7 @@ class _DecisionRequest(BaseModel):
     soil_type: str = Field(min_length=1, max_length=50)
     current_moisture_mm: float = Field(ge=0, le=500)
     rainfall_yesterday_mm: float = Field(ge=0, le=1000)
-    start_date: date | None = None
+    start_date: date
     num_simulations: int = Field(default=500, ge=1, le=10000)
     days_to_simulate: int = Field(default=7, ge=1, le=30)
     random_seed: int = Field(
@@ -36,7 +36,7 @@ class CropLogicClient:
         soil_type: str,
         current_moisture_mm: float,
         rainfall_yesterday_mm: float,
-        start_date: str | None = None,
+        start_date: str,
         num_simulations: int = 500,
         random_seed: int = 42,
         days_to_simulate: int = 7,
@@ -66,11 +66,7 @@ class CropLogicClient:
             num_simulations=request.num_simulations,
             random_seed=request.random_seed,
             days_to_simulate=request.days_to_simulate,
-            start_date=(
-                request.start_date.isoformat()
-                if request.start_date is not None
-                else None
-            ),
+            start_date=request.start_date.isoformat(),
             calibration_artifact=calibration_artifact,
         )
 
