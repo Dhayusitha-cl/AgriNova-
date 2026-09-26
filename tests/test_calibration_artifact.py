@@ -301,6 +301,28 @@ def test_build_calibration_artifact_from_processed_files(tmp_path):
             assert np.all(values >= 0)
 
 
+def test_build_calibration_artifact_derives_pattern_from_location(tmp_path):
+    data_dir = make_processed_rainfall_files(tmp_path)
+
+    (data_dir / "rainfall_test_2020.csv").rename(
+        data_dir / "rainfall_demo_2020.csv"
+    )
+    (data_dir / "rainfall_test_2021.csv").rename(
+        data_dir / "rainfall_demo_2021.csv"
+    )
+
+    artifact = build_calibration_artifact(
+        data_dir=data_dir,
+        location="demo",
+    )
+
+    assert artifact.location == "demo"
+    assert artifact.source_files == [
+        "rainfall_demo_2020.csv",
+        "rainfall_demo_2021.csv",
+    ]
+
+
 def test_build_calibration_artifact_can_be_saved(tmp_path):
     data_dir = make_processed_rainfall_files(tmp_path)
 

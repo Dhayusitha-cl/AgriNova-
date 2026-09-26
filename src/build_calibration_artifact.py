@@ -29,12 +29,11 @@ from src.rainfall_amount_calibration import load_processed_rainfall
 
 
 DEFAULT_DATA_DIR = "data/processed"
-DEFAULT_PATTERN = "rainfall_yavatmal_*.csv"
 
 
 def build_calibration_artifact(
     data_dir: str | Path = DEFAULT_DATA_DIR,
-    pattern: str = DEFAULT_PATTERN,
+    pattern: str | None = None,
     location: str = "yavatmal",
 ) -> CalibrationArtifact:
     """
@@ -44,6 +43,9 @@ def build_calibration_artifact(
     """
 
     data_dir = Path(data_dir)
+
+    if pattern is None:
+        pattern = f"rainfall_{location}_*.csv"
 
     rainfall_data = load_processed_rainfall(
         data_dir=data_dir,
@@ -160,7 +162,7 @@ def build_calibration_artifact(
 def build_and_save_calibration_artifact(
     output_path: str | Path,
     data_dir: str | Path = DEFAULT_DATA_DIR,
-    pattern: str = DEFAULT_PATTERN,
+    pattern: str | None = None,
     location: str = "yavatmal",
 ) -> CalibrationArtifact:
     """Build and save a calibration artifact."""
