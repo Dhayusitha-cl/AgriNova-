@@ -21,6 +21,25 @@ def test_sdk_returns_typed_decision_result():
     assert isinstance(result, DecisionResult)
     assert result.decision in {"SOW TODAY", "WAIT", "SWITCH CROP"}
 
+def test_sdk_is_reproducible_with_same_request():
+    payload = {
+        "location_id": "yavatmal",
+        "crop_name": "cotton",
+        "soil_type": "medium_black",
+        "current_moisture_mm": 35.0,
+        "rainfall_yesterday_mm": 12.0,
+        "start_date": "2024-06-15",
+        "num_simulations": 10,
+        "days_to_simulate": 7,
+        "random_seed": 123,
+    }
+
+    client = CropLogicClient()
+
+    first = client.assess_sowing(**payload)
+    second = client.assess_sowing(**payload)
+
+    assert first.model_dump() == second.model_dump()
 
 def test_sdk_probability_fields_are_bounded():
     result = CropLogicClient().assess_sowing(
