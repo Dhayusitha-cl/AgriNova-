@@ -4,6 +4,7 @@ import pytest
 
 from src.calibration_registry import (
     CALIBRATION_ARTIFACTS,
+    CalibrationRegistryEntry,
     get_calibration_artifact,
 )
 
@@ -40,17 +41,23 @@ def test_missing_artifact_is_rejected(monkeypatch, tmp_path):
     monkeypatch.setitem(
         CALIBRATION_ARTIFACTS,
         "missing",
-        tmp_path / "missing.json",
+        CalibrationRegistryEntry(
+            artifact_path=tmp_path / "missing.json",
+            climate_source="test_source",
+            climate_grid_key="test_source:test",
+        ),
     )
 
-    with pytest.raises(FileNotFoundError, match="Calibration artifact not found"):
+    with pytest.raises(
+        FileNotFoundError,
+        match="Calibration artifact not found",
+    ):
         get_calibration_artifact("missing")
-
 
 def test_artifact_location_mismatch_is_rejected(monkeypatch, tmp_path):
     artifact_path = tmp_path / "artifact.json"
 
-    source = CALIBRATION_ARTIFACTS["yavatmal"]
+    source = CALIBRATION_ARTIFACTS["yavatmal"].artifact_path
     artifact_data = json.loads(source.read_text(encoding="utf-8"))
     artifact_data["location"] = "other_location"
 
@@ -62,8 +69,26 @@ def test_artifact_location_mismatch_is_rejected(monkeypatch, tmp_path):
     monkeypatch.setitem(
         CALIBRATION_ARTIFACTS,
         "yavatmal",
-        artifact_path,
+        CalibrationRegistryEntry(
+            artifact_path=artifact_path,
+            climate_source="imd_gridded_rainfall",
+            climate_grid_key="imd_gridded_rainfall:20.50:78.00",
+        ),
     )
 
     with pytest.raises(ValueError, match="location mismatch"):
         get_calibration_artifact("yavatmal")
+
+def test_yavatmal_registry_contains_climate_metadata():
+    entry = CALIBRATION_ARTIFACTS["yavatmal"]
+
+    assert entry.climate_source == "imd_gridded_rainfall"
+    assert entry.climate_grid_key == "imd_gridded_rainfall:20.50:78.00"
+
+
+def test_climate_grid_identity_is_separate_from_artifact_location():
+    entry = CALIBRATION_ARTIFACTS["yavatmal"]
+    artifact = get_calibration_artifact("yavatmal")
+
+    assert artifact.location == "yavatmal"
+    assert entry.climate_grid_key != artifact.location
