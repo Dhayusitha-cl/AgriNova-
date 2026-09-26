@@ -1,8 +1,12 @@
 import json
 
+import numpy as np
 import pytest
+import xarray as xr
 
 from importlib.resources import files
+
+from src.imd_data import resolve_imd_climate_grid
 from src.location import GeographicLocation, resolve_climate_grid
 from src.calibration_registry import (
     CALIBRATION_ARTIFACTS,
@@ -161,10 +165,38 @@ def test_geographic_location_resolves_to_registered_calibration():
         longitude=78.13,
     )
 
-    climate_grid = resolve_climate_grid(
+    rainfall = np.zeros(
+        (1, 4, 4),
+        dtype=float,
+    )
+
+    dataset = xr.Dataset(
+        {
+            "RAINFALL": (
+                ("TIME", "LATITUDE", "LONGITUDE"),
+                rainfall,
+            ),
+        },
+        coords={
+            "TIME": [0],
+            "LATITUDE": [
+                20.0,
+                20.25,
+                20.5,
+                20.75,
+            ],
+            "LONGITUDE": [
+                77.75,
+                78.0,
+                78.25,
+                78.5,
+            ],
+        },
+    )
+
+    climate_grid = resolve_imd_climate_grid(
+        dataset,
         location,
-        [20.0, 20.25, 20.5, 20.75],
-        [77.75, 78.0, 78.25, 78.5],
     )
 
     artifact = get_calibration_artifact_for_grid(
@@ -172,7 +204,9 @@ def test_geographic_location_resolves_to_registered_calibration():
         climate_grid.key,
     )
 
-    assert climate_grid.key == "imd_gridded_rainfall:20.50:78.25"
+    assert climate_grid.key == (
+        "imd_gridded_rainfall:20.50:78.25"
+    )
     assert artifact.location == "yavatmal"
 
 
