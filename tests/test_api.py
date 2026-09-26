@@ -362,6 +362,8 @@ def test_decision_requires_start_date_without_transition_matrix():
         float("-inf"),
     ],
 )
+
+
 def test_non_finite_transition_matrix_returns_400(bad_value):
     payload = valid_payload()
     payload["transition_matrix"][0][0] = bad_value
@@ -379,4 +381,72 @@ def test_non_finite_transition_matrix_returns_400(bad_value):
     assert body["code"] == "INVALID_TRANSITION_MATRIX"
     assert body["message"] == (
         "Transition probabilities must be finite numbers."
+    )
+
+def test_request_validation_error_has_structured_contract():
+    payload = valid_payload()
+    payload["current_moisture_mm"] = -10
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 422
+
+    detail = response.json()["detail"]
+
+    assert detail["code"] == "REQUEST_VALIDATION_ERROR"
+    assert detail["message"] == "Request validation failed."
+    assert isinstance(detail["errors"], list)
+    assert len(detail["errors"]) >= 1
+
+    error = detail["errors"][0]
+
+    assert "loc" in error
+    assert "type" in error
+    assert "message" in error
+    assert "input" not in error
+
+
+def test_missing_required_request_field_has_structured_error():
+    payload = valid_payload()
+    payload.pop("crop_name")
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 422
+
+    detail = response.json()["detail"]
+
+    assert detail["code"] == "REQUEST_VALIDATION_ERROR"
+
+    assert any(
+        "crop_name" in error["loc"]
+        for error in detail["errors"]
+    )
+
+
+def test_invalid_date_has_structured_error():
+    payload = valid_payload()
+    payload.pop("transition_matrix")
+    payload["start_date"] = "not-a-date"
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 422
+
+    detail = response.json()["detail"]
+
+    assert detail["code"] == "REQUEST_VALIDATION_ERROR"
+
+    assert any(
+        "start_date" in error["loc"]
+        for error in detail["errors"]
     )

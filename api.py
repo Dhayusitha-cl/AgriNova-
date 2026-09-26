@@ -1,8 +1,11 @@
 import logging
 import math
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
 from datetime import date
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from src.calibration_artifact import ARTIFACT_SCHEMA_VERSION
 from croplogic_saathi.models import DecisionTrace
@@ -30,6 +33,33 @@ def _api_error(
         detail={
             "code": code,
             "message": message,
+        },
+    )
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(
+    request: Request,
+    exc: RequestValidationError,
+):
+    errors = []
+
+    for error in exc.errors():
+        errors.append(
+            {
+                "loc": list(error.get("loc", [])),
+                "type": error.get("type", "validation_error"),
+                "message": error.get("msg", "Invalid request."),
+            }
+        )
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": {
+                "code": "REQUEST_VALIDATION_ERROR",
+                "message": "Request validation failed.",
+                "errors": errors,
+            }
         },
     )
 
