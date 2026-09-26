@@ -6,6 +6,7 @@ from src.calibration_registry import (
     CALIBRATION_ARTIFACTS,
     CalibrationRegistryEntry,
     get_calibration_artifact,
+    get_calibration_artifact_for_grid,
 )
 
 
@@ -92,3 +93,61 @@ def test_climate_grid_identity_is_separate_from_artifact_location():
 
     assert artifact.location == "yavatmal"
     assert entry.climate_grid_key != artifact.location
+
+
+def test_load_artifact_for_climate_grid():
+    artifact = get_calibration_artifact_for_grid(
+        "imd_gridded_rainfall",
+        "imd_gridded_rainfall:20.50:78.00",
+    )
+
+    assert artifact.location == "yavatmal"
+
+
+def test_climate_grid_lookup_is_case_insensitive():
+    artifact = get_calibration_artifact_for_grid(
+        "IMD_GRIDDED_RAINFALL",
+        "IMD_GRIDDED_RAINFALL:20.50:78.00",
+    )
+
+    assert artifact.location == "yavatmal"
+
+
+def test_unknown_climate_grid_is_rejected():
+    with pytest.raises(
+        ValueError,
+        match="No calibration artifact is configured for climate grid",
+    ):
+        get_calibration_artifact_for_grid(
+            "imd_gridded_rainfall",
+            "imd_gridded_rainfall:20.75:78.00",
+        )
+
+
+def test_wrong_climate_source_is_rejected():
+    with pytest.raises(
+        ValueError,
+        match="No calibration artifact is configured for climate grid",
+    ):
+        get_calibration_artifact_for_grid(
+            "other_source",
+            "imd_gridded_rainfall:20.50:78.00",
+        )
+
+
+@pytest.mark.parametrize(
+    "climate_source, climate_grid_key",
+    [
+        ("", "imd_gridded_rainfall:20.50:78.00"),
+        ("imd_gridded_rainfall", ""),
+    ],
+)
+def test_climate_grid_lookup_rejects_empty_inputs(
+    climate_source,
+    climate_grid_key,
+):
+    with pytest.raises(ValueError, match="must not be empty"):
+        get_calibration_artifact_for_grid(
+            climate_source,
+            climate_grid_key,
+        )

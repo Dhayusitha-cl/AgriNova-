@@ -67,3 +67,36 @@ def get_calibration_artifact(location: str) -> CalibrationArtifact:
         )
 
     return artifact
+
+
+def get_calibration_artifact_for_grid(
+    climate_source: str,
+    climate_grid_key: str,
+) -> CalibrationArtifact:
+    """
+    Load the validated calibration artifact registered for a climate grid.
+
+    Climate-grid identity is resolved independently from the public location
+    identifier. An unknown grid never falls back to another calibration.
+    """
+    if not isinstance(climate_source, str) or not climate_source.strip():
+        raise ValueError("Climate source must not be empty.")
+
+    if not isinstance(climate_grid_key, str) or not climate_grid_key.strip():
+        raise ValueError("Climate grid key must not be empty.")
+
+    normalized_source = climate_source.strip().lower()
+    normalized_grid_key = climate_grid_key.strip().lower()
+
+    for location, entry in CALIBRATION_ARTIFACTS.items():
+        if (
+            entry.climate_source.strip().lower() == normalized_source
+            and entry.climate_grid_key.strip().lower()
+            == normalized_grid_key
+        ):
+            return get_calibration_artifact(location)
+
+    raise ValueError(
+        "No calibration artifact is configured for climate grid "
+        f"'{climate_grid_key}' from source '{climate_source}'."
+    )
