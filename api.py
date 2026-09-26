@@ -8,7 +8,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src.calibration_artifact import ARTIFACT_SCHEMA_VERSION
-from croplogic_saathi.models import DecisionTrace
+from croplogic_saathi.models import (
+    Assumptions,
+    EconomicComparison,
+    EconomicOutcome,
+    DecisionTrace,
+)
 
 logger = logging.getLogger("croplogic_saathi")
 
@@ -96,33 +101,6 @@ class MoistureSummary(BaseModel):
     mean: list[float]
     min: list[float]
     max: list[float]
-
-
-class EconomicOutcome(BaseModel):
-    decision: str
-    expected_profit: float
-    success_probability: float
-    best_case_profit: float
-    worst_case_profit: float
-    risk_level: str
-    advantage_over_others: float
-
-
-class EconomicComparison(BaseModel):
-    sow_today: EconomicOutcome
-    wait: EconomicOutcome
-    switch: EconomicOutcome
-    best_decision: str
-    best_profit: float
-    all_decisions: list[EconomicOutcome]
-
-
-class Assumptions(BaseModel):
-    daily_et_mm: float
-    wait_days: int
-    economic_decision_policy: str
-    confidence_definition: str
-    simulation_note: str
 
 class DecisionResponse(BaseModel):
     decision: str
