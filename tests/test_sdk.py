@@ -41,6 +41,33 @@ def test_sdk_is_reproducible_with_same_request():
 
     assert first.model_dump() == second.model_dump()
 
+def test_sdk_trace_contains_request_and_calibration_provenance():
+    result = CropLogicClient().assess_sowing(
+        location_id="yavatmal",
+        crop_name="cotton",
+        soil_type="medium_black",
+        current_moisture_mm=35.0,
+        rainfall_yesterday_mm=12.0,
+        start_date="2024-06-15",
+        num_simulations=10,
+        days_to_simulate=7,
+        random_seed=123,
+    )
+
+    trace = result.trace
+
+    assert trace.location_id == "yavatmal"
+    assert trace.calibration_schema_version == "1.0"
+    assert trace.calibration_artifact_type == "rainfall_calibration"
+    assert len(trace.calibration_artifact_id) == 64
+    assert trace.start_date.isoformat() == "2024-06-15"
+    assert trace.random_seed == 123
+    assert trace.num_simulations == 10
+    assert trace.days_to_simulate == 7
+    assert trace.crop_name == "cotton"
+    assert trace.soil_type == "medium_black"
+    assert trace.initial_rainfall_state in {"dry", "drizzle", "rain"}
+
 def test_sdk_probability_fields_are_bounded():
     result = CropLogicClient().assess_sowing(
         location_id="yavatmal",
