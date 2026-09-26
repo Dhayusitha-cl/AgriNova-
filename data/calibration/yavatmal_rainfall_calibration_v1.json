@@ -1,5 +1,8 @@
 {
   "schema_version": "1.0",
+  "source_dataset": "IMD gridded rainfall",
+  "preprocessing_version": "1.0",
+  "calibration_method_version": "1.0",
   "artifact_type": "rainfall_calibration",
   "location": "yavatmal",
   "source_files": [

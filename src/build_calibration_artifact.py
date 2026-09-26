@@ -13,7 +13,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.calibration_artifact import CalibrationArtifact, RAINFALL_STATES
+from src.calibration_artifact import (
+    CALIBRATION_METHOD_VERSION,
+    PREPROCESSING_VERSION,
+    SOURCE_DATASET,
+    CalibrationArtifact,
+    RAINFALL_STATES,
+)
+
 from src.markov_calibration import (
     calculate_transition_matrix,
     get_monthly_transition_matrix_with_fallback,
@@ -130,6 +137,9 @@ def build_calibration_artifact(
 
     artifact = CalibrationArtifact(
         location=location,
+        source_dataset=SOURCE_DATASET,
+        preprocessing_version=PREPROCESSING_VERSION,
+        calibration_method_version=CALIBRATION_METHOD_VERSION,
         source_files=source_files,
         source_start_date=(
             rainfall_data["date"].min().date().isoformat()

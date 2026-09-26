@@ -26,6 +26,9 @@ import numpy as np
 
 ARTIFACT_SCHEMA_VERSION = "1.0"
 RAINFALL_STATES = ("dry", "drizzle", "rain")
+SOURCE_DATASET = "IMD gridded rainfall"
+PREPROCESSING_VERSION = "1.0"
+CALIBRATION_METHOD_VERSION = "1.0"
 
 
 @dataclass
@@ -53,6 +56,9 @@ class CalibrationArtifact:
     """
 
     location: str
+    source_dataset: str
+    preprocessing_version: str
+    calibration_method_version: str
     source_files: list[str]
     source_start_date: str
     source_end_date: str
@@ -96,6 +102,20 @@ class CalibrationArtifact:
             raise ValueError(
                 "Artifact source_end_date must not be empty."
             )
+        if not isinstance(self.source_dataset, str) or not self.source_dataset.strip():
+            raise ValueError("Source dataset must not be empty.")
+
+        if (
+            not isinstance(self.preprocessing_version, str)
+            or not self.preprocessing_version.strip()
+        ):
+            raise ValueError("Preprocessing version must not be empty.")
+
+        if (
+            not isinstance(self.calibration_method_version, str)
+            or not self.calibration_method_version.strip()
+        ):
+            raise ValueError("Calibration method version must not be empty.")
 
         self._validate_matrix(
             self.fallback_transition_matrix,
@@ -194,6 +214,9 @@ class CalibrationArtifact:
 
         return {
             "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "source_dataset": self.source_dataset,
+            "preprocessing_version": self.preprocessing_version,
+            "calibration_method_version": self.calibration_method_version,
             "artifact_type": "rainfall_calibration",
             "location": self.location,
             "source_files": list(self.source_files),
@@ -283,6 +306,9 @@ class CalibrationArtifact:
             source_files=list(data["source_files"]),
             source_start_date=data["source_start_date"],
             source_end_date=data["source_end_date"],
+            source_dataset=data["source_dataset"],
+            preprocessing_version=data["preprocessing_version"],
+            calibration_method_version=data["calibration_method_version"],
             monthly_transition_matrices=monthly_matrices,
             rainfall_samples=rainfall_samples,
             fallback_transition_matrix=np.asarray(

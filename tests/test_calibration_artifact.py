@@ -4,6 +4,9 @@ import pytest
 
 from src.calibration_artifact import (
     ARTIFACT_SCHEMA_VERSION,
+    CALIBRATION_METHOD_VERSION,
+    PREPROCESSING_VERSION,
+    SOURCE_DATASET,
     CalibrationArtifact,
     RAINFALL_STATES,
 )
@@ -49,6 +52,9 @@ def make_test_artifact():
         ],
         source_start_date="2020-06-01",
         source_end_date="2021-09-30",
+        source_dataset=SOURCE_DATASET,
+        preprocessing_version=PREPROCESSING_VERSION,
+        calibration_method_version=CALIBRATION_METHOD_VERSION,
         monthly_transition_matrices=monthly_matrices,
         rainfall_samples=rainfall_samples,
         fallback_transition_matrix=matrix.copy(),
@@ -74,6 +80,12 @@ def test_artifact_round_trip(tmp_path):
     assert loaded.source_files == artifact.source_files
     assert loaded.source_start_date == artifact.source_start_date
     assert loaded.source_end_date == artifact.source_end_date
+    assert loaded.source_dataset == artifact.source_dataset
+    assert loaded.preprocessing_version == artifact.preprocessing_version
+    assert (
+        loaded.calibration_method_version
+        == artifact.calibration_method_version
+    )
 
     np.testing.assert_allclose(
         loaded.fallback_transition_matrix,
@@ -101,6 +113,12 @@ def test_serialized_artifact_contains_schema_metadata():
     assert data["schema_version"] == ARTIFACT_SCHEMA_VERSION
     assert data["artifact_type"] == "rainfall_calibration"
     assert data["rainfall_states"] == list(RAINFALL_STATES)
+    assert data["source_dataset"] == SOURCE_DATASET
+    assert data["preprocessing_version"] == PREPROCESSING_VERSION
+    assert (
+        data["calibration_method_version"]
+        == CALIBRATION_METHOD_VERSION
+    )
 
 
 def test_missing_month_is_rejected():
@@ -346,3 +364,28 @@ def test_monte_carlo_rejects_invalid_calibration_artifact():
             num_simulations=10,
             calibration_artifact=object(),
         )
+
+def test_provenance_changes_content_hash():
+    artifact = make_test_artifact()
+
+    original_hash = artifact.content_hash()
+
+    artifact.preprocessing_version = "1.1"
+
+    assert artifact.content_hash() != original_hash
+
+def test_build_calibration_artifact_contains_provenance(tmp_path):
+    data_dir = make_processed_rainfall_files(tmp_path)
+
+    artifact = build_calibration_artifact(
+        data_dir=data_dir,
+        pattern="rainfall_test_*.csv",
+        location="test_location",
+    )
+
+    assert artifact.source_dataset == SOURCE_DATASET
+    assert artifact.preprocessing_version == PREPROCESSING_VERSION
+    assert (
+        artifact.calibration_method_version
+        == CALIBRATION_METHOD_VERSION
+    )
