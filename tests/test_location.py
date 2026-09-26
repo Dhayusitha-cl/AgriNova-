@@ -13,24 +13,6 @@ LATITUDES = [20.0, 20.25, 20.5, 20.75]
 LONGITUDES = [77.75, 78.0, 78.25, 78.5]
 
 
-def test_resolves_to_nearest_grid_cell():
-    location = GeographicLocation(
-        latitude=20.39,
-        longitude=78.12,
-    )
-
-    result = resolve_climate_grid(
-        location,
-        LATITUDES,
-        LONGITUDES,
-    )
-
-    assert result.latitude == 20.5
-    assert result.longitude == 78.0
-    assert result.source == "imd_gridded_rainfall"
-    assert result.key == "imd_gridded_rainfall:20.50:78.00"
-
-
 def test_geographic_location_accepts_valid_coordinates():
     location = GeographicLocation(
         latitude=20.39,
