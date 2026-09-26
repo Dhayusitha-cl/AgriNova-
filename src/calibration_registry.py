@@ -25,7 +25,7 @@ CALIBRATION_ARTIFACTS = {
             / "yavatmal_rainfall_calibration_v1.json"
         ),
         climate_source="imd_gridded_rainfall",
-        climate_grid_key="imd_gridded_rainfall:20.50:78.00",
+        climate_grid_key="imd_gridded_rainfall:20.50:78.25",
     ),
 }
 

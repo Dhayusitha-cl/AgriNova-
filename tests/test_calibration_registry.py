@@ -74,7 +74,7 @@ def test_artifact_location_mismatch_is_rejected(monkeypatch, tmp_path):
         CalibrationRegistryEntry(
             artifact_path=artifact_path,
             climate_source="imd_gridded_rainfall",
-            climate_grid_key="imd_gridded_rainfall:20.50:78.00",
+            climate_grid_key="imd_gridded_rainfall:20.50:78.25",
         ),
     )
 
@@ -85,7 +85,7 @@ def test_yavatmal_registry_contains_climate_metadata():
     entry = CALIBRATION_ARTIFACTS["yavatmal"]
 
     assert entry.climate_source == "imd_gridded_rainfall"
-    assert entry.climate_grid_key == "imd_gridded_rainfall:20.50:78.00"
+    assert entry.climate_grid_key == "imd_gridded_rainfall:20.50:78.25"
 
 
 def test_climate_grid_identity_is_separate_from_artifact_location():
@@ -99,7 +99,7 @@ def test_climate_grid_identity_is_separate_from_artifact_location():
 def test_load_artifact_for_climate_grid():
     artifact = get_calibration_artifact_for_grid(
         "imd_gridded_rainfall",
-        "imd_gridded_rainfall:20.50:78.00",
+        "imd_gridded_rainfall:20.50:78.25",
     )
 
     assert artifact.location == "yavatmal"
@@ -108,7 +108,7 @@ def test_load_artifact_for_climate_grid():
 def test_climate_grid_lookup_is_case_insensitive():
     artifact = get_calibration_artifact_for_grid(
         "IMD_GRIDDED_RAINFALL",
-        "IMD_GRIDDED_RAINFALL:20.50:78.00",
+        "IMD_GRIDDED_RAINFALL:20.50:78.25",
     )
 
     assert artifact.location == "yavatmal"
@@ -157,7 +157,7 @@ def test_climate_grid_lookup_rejects_empty_inputs(
 def test_geographic_location_resolves_to_registered_calibration():
     location = GeographicLocation(
         latitude=20.39,
-        longitude=78.12,
+        longitude=78.13,
     )
 
     climate_grid = resolve_climate_grid(
@@ -171,7 +171,7 @@ def test_geographic_location_resolves_to_registered_calibration():
         climate_grid.key,
     )
 
-    assert climate_grid.key == "imd_gridded_rainfall:20.50:78.00"
+    assert climate_grid.key == "imd_gridded_rainfall:20.50:78.25"
     assert artifact.location == "yavatmal"
 
 

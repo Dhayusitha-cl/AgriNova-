@@ -7,46 +7,35 @@ from src.imd_data import (
     extract_daily_rainfall,
     summarize_rainfall,
 )
-
+from src.location import GeographicLocation
+from src.rainfall_states import classify_rainfall
 
 RAW_DIR = Path("data/raw")
 PROCESSED_DIR = Path("data/processed")
 
-LATITUDE = 20.39
-LONGITUDE = 78.13
-
-START_YEAR = 2019
-END_YEAR = 2024
-
-
-def classify_rainfall(rainfall_mm):
-    """Convert rainfall amount into the project's weather states.
-
-    States:
-    - dry: 0 mm
-    - drizzle: greater than 0 and less than 10 mm
-    - rain: 10 mm or more
-    """
-
-    if pd.isna(rainfall_mm):
-        raise ValueError("Rainfall value cannot be missing.")
-
-    if rainfall_mm < 0:
-        raise ValueError("Rainfall cannot be negative.")
-
-    if rainfall_mm == 0:
-        return "dry"
-    elif rainfall_mm < 10:
-        return "drizzle"
-    else:
-        return "rain"
+DEFAULT_LOCATION_ID = "yavatmal"
+DEFAULT_LATITUDE = 20.39
+DEFAULT_LONGITUDE = 78.13
+DEFAULT_START_YEAR = 2019
+DEFAULT_END_YEAR = 2024
 
 
-def process_year(year):
+def process_year(
+    year,
+    *,
+    latitude,
+    longitude,
+    location_id,
+    raw_dir=RAW_DIR,
+    processed_dir=PROCESSED_DIR,
+):
     """Extract and preprocess one IMD yearly rainfall dataset."""
 
-    input_file = RAW_DIR / f"RF25_ind{year}_rfp25.nc"
-    output_file = PROCESSED_DIR / f"rainfall_yavatmal_{year}.csv"
+    input_file = raw_dir / f"RF25_ind{year}_rfp25.nc"
+    output_file = (
+        processed_dir
+        / f"rainfall_{location_id}_{year}.csv"
+    )
 
     if not input_file.exists():
         raise FileNotFoundError(f"Missing input file: {input_file}")
@@ -57,10 +46,14 @@ def process_year(year):
     dataset = open_rainfall_dataset(input_file)
 
     try:
+        location = GeographicLocation(
+            latitude=latitude,
+            longitude=longitude,
+        )
+
         extracted = extract_daily_rainfall(
             dataset,
-            latitude=LATITUDE,
-            longitude=LONGITUDE,
+            location,
         )
 
         summary = summarize_rainfall(extracted)
@@ -92,11 +85,13 @@ def process_year(year):
     if (df["rainfall_mm"] < 0).any():
         raise ValueError(f"Negative rainfall found in {year}.")
 
-    # Convert rainfall into the weather states used by
-    # the Markov Chain model.
-    df["rainfall_state"] = df["rainfall_mm"].apply(classify_rainfall)
+    # Convert rainfall into the canonical weather states
+    # used by the Markov Chain model.
+    df["rainfall_state"] = df["rainfall_mm"].apply(
+        classify_rainfall
+    )
 
-    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    processed_dir.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_file, index=False)
 
     print(
@@ -116,15 +111,41 @@ def process_year(year):
     return df
 
 
-def main():
-    """Process all requested IMD years."""
+def main(
+    *,
+    location_id=DEFAULT_LOCATION_ID,
+    latitude=DEFAULT_LATITUDE,
+    longitude=DEFAULT_LONGITUDE,
+    start_year=DEFAULT_START_YEAR,
+    end_year=DEFAULT_END_YEAR,
+    raw_dir=RAW_DIR,
+    processed_dir=PROCESSED_DIR,
+):
+    """Process all requested IMD years for a location."""
+
+    if not isinstance(location_id, str) or not location_id.strip():
+        raise ValueError("location_id must not be empty.")
+
+    if start_year > end_year:
+        raise ValueError("start_year must not be greater than end_year.")
 
     print("=" * 60)
     print("AgriNova — IMD Multi-Year Rainfall Preprocessing")
     print("=" * 60)
+    print(f"Location: {location_id}")
+    print(f"Latitude: {latitude}")
+    print(f"Longitude: {longitude}")
+    print(f"Years: {start_year}-{end_year}")
 
-    for year in range(START_YEAR, END_YEAR + 1):
-        process_year(year)
+    for year in range(start_year, end_year + 1):
+        process_year(
+            year,
+            latitude=latitude,
+            longitude=longitude,
+            location_id=location_id,
+            raw_dir=raw_dir,
+            processed_dir=processed_dir,
+        )
 
     print("\n" + "=" * 60)
     print("All years processed successfully.")
