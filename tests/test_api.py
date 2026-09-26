@@ -1,7 +1,8 @@
 from fastapi.testclient import TestClient
 
 from api import app
-
+import pytest
+import json
 
 client = TestClient(app)
 
@@ -352,3 +353,30 @@ def test_decision_requires_start_date_without_transition_matrix():
         "code": "MISSING_START_DATE",
         "message": "Either transition_matrix or start_date must be provided.",
     }
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+    ],
+)
+def test_non_finite_transition_matrix_returns_400(bad_value):
+    payload = valid_payload()
+    payload["transition_matrix"][0][0] = bad_value
+
+    response = client.post(
+        "/api/v1/decision",
+        content=json.dumps(payload, allow_nan=True),
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 400
+
+    body = response.json()["detail"]
+
+    assert body["code"] == "INVALID_TRANSITION_MATRIX"
+    assert body["message"] == (
+        "Transition probabilities must be finite numbers."
+    )

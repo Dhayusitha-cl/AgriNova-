@@ -13,8 +13,17 @@ class _DecisionRequest(BaseModel):
     location_id: str = Field(min_length=1, max_length=100)
     crop_name: str = Field(min_length=1, max_length=50)
     soil_type: str = Field(min_length=1, max_length=50)
-    current_moisture_mm: float = Field(ge=0, le=500)
-    rainfall_yesterday_mm: float = Field(ge=0, le=1000)
+    current_moisture_mm: float = Field(
+        ge=0,
+        le=500,
+        allow_inf_nan=False,
+    )
+
+    rainfall_yesterday_mm: float = Field(
+        ge=0,
+        le=1000,
+        allow_inf_nan=False,
+    )
     start_date: date
     num_simulations: int = Field(default=500, ge=1, le=10000)
     days_to_simulate: int = Field(default=7, ge=1, le=30)

@@ -1,4 +1,5 @@
 import logging
+import math
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from datetime import date
@@ -40,8 +41,17 @@ class DecisionRequest(BaseModel):
     location_id: str = Field(min_length=1, max_length=100)
     crop_name: str = Field(min_length=1, max_length=50)
     soil_type: str = Field(min_length=1, max_length=50)
-    current_moisture_mm: float = Field(ge=0, le=500)
-    rainfall_yesterday_mm: float = Field(ge=0, le=1000)
+    current_moisture_mm: float = Field(
+        ge=0,
+        le=500,
+        allow_inf_nan=False,
+    )
+
+    rainfall_yesterday_mm: float = Field(
+        ge=0,
+        le=1000,
+        allow_inf_nan=False,
+    )
     transition_matrix: list[list[float]] | None = None
     start_date: date | None = None
     num_simulations: int = Field(default=500, ge=1, le=10000)
@@ -219,6 +229,13 @@ def decision(request: DecisionRequest):
                     400,
                     "INVALID_TRANSITION_MATRIX",
                     "Each transition matrix row must contain 3 values."
+                )
+
+            if any(not math.isfinite(value) for value in row):
+                raise _api_error(
+                    400,
+                    "INVALID_TRANSITION_MATRIX",
+                    "Transition probabilities must be finite numbers.",
                 )
 
             if any(value < 0 or value > 1 for value in row):

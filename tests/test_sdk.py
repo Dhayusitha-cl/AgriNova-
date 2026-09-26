@@ -265,3 +265,31 @@ def test_sdk_rejects_missing_start_date():
             current_moisture_mm=35.0,
             rainfall_yesterday_mm=12.0,
         )
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("current_moisture_mm", float("nan")),
+        ("current_moisture_mm", float("inf")),
+        ("current_moisture_mm", float("-inf")),
+        ("rainfall_yesterday_mm", float("nan")),
+        ("rainfall_yesterday_mm", float("inf")),
+        ("rainfall_yesterday_mm", float("-inf")),
+    ],
+)
+def test_sdk_rejects_non_finite_numeric_inputs(field, value):
+    client = CropLogicClient()
+
+    kwargs = {
+        "location_id": "yavatmal",
+        "crop_name": "cotton",
+        "soil_type": "medium_black",
+        "current_moisture_mm": 35,
+        "rainfall_yesterday_mm": 12,
+        "start_date": "2024-06-15",
+    }
+
+    kwargs[field] = value
+
+    with pytest.raises(ValueError):
+        client.assess_sowing(**kwargs)
