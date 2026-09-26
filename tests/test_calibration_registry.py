@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from importlib.resources import files
 from src.location import GeographicLocation, resolve_climate_grid
 from src.calibration_registry import (
     CALIBRATION_ARTIFACTS,
@@ -195,3 +196,19 @@ def test_unregistered_geographic_grid_does_not_fallback():
             climate_grid.source,
             climate_grid.key,
         )
+
+def test_registry_is_loaded_from_packaged_json():
+    from importlib.resources import files
+
+    registry_path = files("data") / "calibration" / "registry.json"
+
+    assert registry_path.exists()
+
+
+def test_registry_yavatmal_artifact_path_is_relative_to_calibration_package():
+    entry = CALIBRATION_ARTIFACTS["yavatmal"]
+
+    assert entry.artifact_path.name == (
+        "yavatmal_rainfall_calibration_v1.json"
+    )
+    assert entry.artifact_path.exists()

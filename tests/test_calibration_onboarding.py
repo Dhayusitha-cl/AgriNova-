@@ -1,9 +1,11 @@
+import json
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
 import src.calibration_onboarding as onboarding
+from src.calibration_onboarding import register_calibration
 
 
 def _write_raw_file(raw_dir: Path, year: int) -> None:
@@ -367,3 +369,141 @@ def test_onboard_calibration_does_not_include_processed_years_outside_range(
         "rainfall_test_location_2023.csv",
         "rainfall_test_location_2024.csv",
     ]
+
+def test_register_calibration_adds_new_location(tmp_path):
+    calibration_dir = tmp_path / "calibration"
+    calibration_dir.mkdir()
+
+    registry_path = calibration_dir / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "entries": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    artifact_source = (
+        Path("data/calibration/yavatmal_rainfall_calibration_v1.json")
+    )
+
+    artifact_data = json.loads(
+        artifact_source.read_text(encoding="utf-8")
+    )
+    artifact_data["location"] = "new_location"
+
+    artifact_path = calibration_dir / "new_location_v1.json"
+    artifact_path.write_text(
+        json.dumps(artifact_data),
+        encoding="utf-8",
+    )
+
+    register_calibration(
+        registry_path=registry_path,
+        location_id="new_location",
+        artifact_path=artifact_path,
+        climate_source="imd_gridded_rainfall",
+        climate_grid_key="imd_gridded_rainfall:20.50:78.25",
+    )
+
+    registry = json.loads(
+        registry_path.read_text(encoding="utf-8")
+    )
+
+    assert registry["entries"]["new_location"] == {
+        "artifact_path": "new_location_v1.json",
+        "climate_source": "imd_gridded_rainfall",
+        "climate_grid_key": "imd_gridded_rainfall:20.50:78.25",
+    }
+
+
+def test_register_calibration_rejects_location_mismatch(tmp_path):
+    calibration_dir = tmp_path / "calibration"
+    calibration_dir.mkdir()
+
+    registry_path = calibration_dir / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "entries": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    artifact_source = (
+        Path("data/calibration/yavatmal_rainfall_calibration_v1.json")
+    )
+
+    artifact_path = calibration_dir / "artifact.json"
+    artifact_path.write_text(
+        artifact_source.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="location mismatch"):
+        register_calibration(
+            registry_path=registry_path,
+            location_id="different_location",
+            artifact_path=artifact_path,
+            climate_source="imd_gridded_rainfall",
+            climate_grid_key="imd_gridded_rainfall:20.50:78.25",
+        )
+
+
+def test_register_calibration_rejects_duplicate_without_overwrite(
+    tmp_path,
+):
+    calibration_dir = tmp_path / "calibration"
+    calibration_dir.mkdir()
+
+    registry_path = calibration_dir / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "entries": {
+                    "new_location": {
+                        "artifact_path": "existing.json",
+                        "climate_source": "imd_gridded_rainfall",
+                        "climate_grid_key": (
+                            "imd_gridded_rainfall:20.50:78.25"
+                        ),
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    artifact_source = (
+        Path("data/calibration/yavatmal_rainfall_calibration_v1.json")
+    )
+
+    artifact_data = json.loads(
+        artifact_source.read_text(encoding="utf-8")
+    )
+    artifact_data["location"] = "new_location"
+
+    artifact_path = calibration_dir / "new_location_v2.json"
+    artifact_path.write_text(
+        json.dumps(artifact_data),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="already registered"):
+        register_calibration(
+            registry_path=registry_path,
+            location_id="new_location",
+            artifact_path=artifact_path,
+            climate_source="imd_gridded_rainfall",
+            climate_grid_key="imd_gridded_rainfall:20.50:78.25",
+        )
+
+def test_registration_does_not_mutate_runtime_registry():
+    from src.calibration_registry import CALIBRATION_ARTIFACTS
+
+    assert "yavatmal" in CALIBRATION_ARTIFACTS

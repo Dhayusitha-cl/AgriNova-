@@ -1,7 +1,11 @@
+import json
 from dataclasses import dataclass
 from importlib.resources import files
 
 from src.calibration_artifact import CalibrationArtifact
+
+
+REGISTRY_SCHEMA_VERSION = "1.0"
 
 
 @dataclass(frozen=True)
@@ -17,17 +21,96 @@ class CalibrationRegistryEntry:
     climate_grid_key: str
 
 
-CALIBRATION_ARTIFACTS = {
-    "yavatmal": CalibrationRegistryEntry(
-        artifact_path=(
-            files("data")
-            / "calibration"
-            / "yavatmal_rainfall_calibration_v1.json"
-        ),
-        climate_source="imd_gridded_rainfall",
-        climate_grid_key="imd_gridded_rainfall:20.50:78.25",
-    ),
-}
+def _load_registry() -> dict[str, CalibrationRegistryEntry]:
+    """
+    Load the packaged calibration registry configuration.
+
+    The registry is configuration data, while this module owns the runtime
+    loading and validation behavior.
+    """
+    registry_path = files("data") / "calibration" / "registry.json"
+
+    if not registry_path.exists():
+        raise FileNotFoundError(
+            f"Calibration registry not found: {registry_path}"
+        )
+
+    try:
+        data = json.loads(
+            registry_path.read_text(encoding="utf-8")
+        )
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Invalid calibration registry JSON: {registry_path}"
+        ) from exc
+
+    if data.get("schema_version") != REGISTRY_SCHEMA_VERSION:
+        raise ValueError(
+            "Unsupported calibration registry schema version: "
+            f"{data.get('schema_version')!r}"
+        )
+
+    entries = data.get("entries")
+
+    if not isinstance(entries, dict):
+        raise ValueError(
+            "Calibration registry 'entries' must be an object."
+        )
+
+    calibration_dir = files("data") / "calibration"
+    registry = {}
+
+    for location, config in entries.items():
+        if not isinstance(location, str) or not location.strip():
+            raise ValueError(
+                "Calibration registry contains an empty location ID."
+            )
+
+        if not isinstance(config, dict):
+            raise ValueError(
+                f"Invalid registry entry for location '{location}'."
+            )
+
+        artifact_path = config.get("artifact_path")
+        climate_source = config.get("climate_source")
+        climate_grid_key = config.get("climate_grid_key")
+
+        if (
+            not isinstance(artifact_path, str)
+            or not artifact_path.strip()
+        ):
+            raise ValueError(
+                f"Registry entry '{location}' has an invalid "
+                "artifact_path."
+            )
+
+        if (
+            not isinstance(climate_source, str)
+            or not climate_source.strip()
+        ):
+            raise ValueError(
+                f"Registry entry '{location}' has an invalid "
+                "climate_source."
+            )
+
+        if (
+            not isinstance(climate_grid_key, str)
+            or not climate_grid_key.strip()
+        ):
+            raise ValueError(
+                f"Registry entry '{location}' has an invalid "
+                "climate_grid_key."
+            )
+
+        registry[location.strip().lower()] = CalibrationRegistryEntry(
+            artifact_path=calibration_dir / artifact_path,
+            climate_source=climate_source,
+            climate_grid_key=climate_grid_key,
+        )
+
+    return registry
+
+CALIBRATION_ARTIFACTS = _load_registry()
 
 
 def get_calibration_artifact(location: str) -> CalibrationArtifact:
