@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from src.location import GeographicLocation, resolve_climate_grid
 from src.calibration_registry import (
     CALIBRATION_ARTIFACTS,
     CalibrationRegistryEntry,
@@ -150,4 +151,47 @@ def test_climate_grid_lookup_rejects_empty_inputs(
         get_calibration_artifact_for_grid(
             climate_source,
             climate_grid_key,
+        )
+
+
+def test_geographic_location_resolves_to_registered_calibration():
+    location = GeographicLocation(
+        latitude=20.39,
+        longitude=78.12,
+    )
+
+    climate_grid = resolve_climate_grid(
+        location,
+        [20.0, 20.25, 20.5, 20.75],
+        [77.75, 78.0, 78.25, 78.5],
+    )
+
+    artifact = get_calibration_artifact_for_grid(
+        climate_grid.source,
+        climate_grid.key,
+    )
+
+    assert climate_grid.key == "imd_gridded_rainfall:20.50:78.00"
+    assert artifact.location == "yavatmal"
+
+
+def test_unregistered_geographic_grid_does_not_fallback():
+    location = GeographicLocation(
+        latitude=20.39,
+        longitude=78.12,
+    )
+
+    climate_grid = resolve_climate_grid(
+        location,
+        [20.75],
+        [78.25],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="No calibration artifact is configured for climate grid",
+    ):
+        get_calibration_artifact_for_grid(
+            climate_grid.source,
+            climate_grid.key,
         )
