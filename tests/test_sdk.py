@@ -88,7 +88,7 @@ def test_sdk_rejects_empty_location():
 
 
 
-def test_sdk_and_api_return_same_decision():
+def test_sdk_and_api_return_same_public_decision_contract():
     payload = {
         "location_id": "yavatmal",
         "crop_name": "cotton",
@@ -111,10 +111,33 @@ def test_sdk_and_api_return_same_decision():
     api_result = api_response.json()
 
     assert sdk_result.decision == api_result["decision"]
+    assert sdk_result.economic_comparison.model_dump() == (
+        api_result["economic_comparison"]
+    )
+
     assert sdk_result.germ_prob_today == api_result["germ_prob_today"]
     assert sdk_result.germ_prob_wait == api_result["germ_prob_wait"]
     assert sdk_result.germ_prob_soybean == api_result["germ_prob_soybean"]
     assert sdk_result.confidence == api_result["confidence"]
+
+    assert sdk_result.current_moisture == api_result["current_moisture"]
+    assert (
+        sdk_result.min_moisture_required
+        == api_result["min_moisture_required"]
+    )
+    assert (
+        sdk_result.initial_rainfall_state
+        == api_result["initial_rainfall_state"]
+    )
+    assert sdk_result.num_simulations == api_result["num_simulations"]
+    assert sdk_result.days_to_simulate == api_result["days_to_simulate"]
+
+    assert sdk_result.assumptions.model_dump() == api_result["assumptions"]
+    assert sdk_result.trace.model_dump(mode="json") == api_result["trace"]
+
+    # These are API diagnostics, not part of the SDK DecisionResult contract.
+    assert "soil_moisture_today" in api_result
+    assert "soil_moisture_wait" in api_result
 
 def test_sdk_rejects_unknown_crop():
     with pytest.raises(ValueError, match="Unknown crop"):
