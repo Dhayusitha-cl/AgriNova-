@@ -5,3 +5,5 @@ venv/
 .venv/
 docs/
 data/raw/
+dist/
+*.egg-info/
