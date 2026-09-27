@@ -1,6 +1,12 @@
 import numpy as np
 import pandas as pd
 import pytest
+import os
+
+from src.build_calibration_artifact import (
+    build_and_save_calibration_artifact,
+    build_calibration_artifact,
+)
 
 from src.calibration_artifact import (
     ARTIFACT_SCHEMA_VERSION,
@@ -356,6 +362,109 @@ def test_build_calibration_artifact_can_be_saved(tmp_path):
         loaded.fallback_transition_matrix,
         artifact.fallback_transition_matrix,
     )
+
+def test_build_and_save_calibration_artifact_publishes_valid_artifact(
+    tmp_path,
+):
+    data_dir = make_processed_rainfall_files(tmp_path)
+
+    output_path = tmp_path / "calibration.json"
+
+    artifact = build_and_save_calibration_artifact(
+        output_path=output_path,
+        data_dir=data_dir,
+        pattern="rainfall_test_*.csv",
+        location="test_location",
+    )
+
+    assert output_path.exists()
+
+    loaded = CalibrationArtifact.load(output_path)
+
+    assert (
+        loaded.content_hash()
+        == artifact.content_hash()
+    )
+
+def test_build_and_save_calibration_artifact_preserves_existing_artifact_on_replace_failure(
+    tmp_path,
+    monkeypatch,
+):
+    data_dir = make_processed_rainfall_files(tmp_path)
+
+    output_path = tmp_path / "calibration.json"
+
+    existing_artifact = build_calibration_artifact(
+        data_dir=data_dir,
+        pattern="rainfall_test_*.csv",
+        location="test_location",
+    )
+
+    existing_artifact.save(output_path)
+
+    original_hash = (
+        CalibrationArtifact.load(output_path)
+        .content_hash()
+    )
+
+    def fail_replace(source, destination):
+        raise OSError("simulated atomic replacement failure")
+
+    monkeypatch.setattr(
+        os,
+        "replace",
+        fail_replace,
+    )
+
+    with pytest.raises(
+        OSError,
+        match="simulated atomic replacement failure",
+    ):
+        build_and_save_calibration_artifact(
+            output_path=output_path,
+            data_dir=data_dir,
+            pattern="rainfall_test_*.csv",
+            location="test_location",
+        )
+
+    preserved = CalibrationArtifact.load(output_path)
+
+    assert preserved.content_hash() == original_hash
+
+def test_build_and_save_calibration_artifact_cleans_temporary_file_on_failure(
+    tmp_path,
+    monkeypatch,
+):
+    data_dir = make_processed_rainfall_files(tmp_path)
+
+    output_path = tmp_path / "calibration.json"
+
+    def fail_replace(source, destination):
+        raise OSError("simulated atomic replacement failure")
+
+    monkeypatch.setattr(
+        os,
+        "replace",
+        fail_replace,
+    )
+
+    with pytest.raises(
+        OSError,
+        match="simulated atomic replacement failure",
+    ):
+        build_and_save_calibration_artifact(
+            output_path=output_path,
+            data_dir=data_dir,
+            pattern="rainfall_test_*.csv",
+            location="test_location",
+        )
+
+    temporary_files = list(
+        tmp_path.glob(".calibration.*.tmp")
+    )
+
+    assert temporary_files == []
+    assert not output_path.exists()
 
 
 def test_monte_carlo_can_consume_calibration_artifact(tmp_path):

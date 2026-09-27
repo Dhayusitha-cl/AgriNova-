@@ -10,6 +10,8 @@ Monte Carlo simulation or decision making.
 from __future__ import annotations
 
 from pathlib import Path
+import os
+import tempfile
 
 import pandas as pd
 
@@ -165,7 +167,13 @@ def build_and_save_calibration_artifact(
     pattern: str | None = None,
     location: str = "yavatmal",
 ) -> CalibrationArtifact:
-    """Build and save a calibration artifact."""
+    """
+    Build, validate, and atomically publish a calibration artifact.
+
+    The artifact is first written to a temporary file beside the final
+    destination and loaded back for validation. The final path is replaced
+    only after the serialized artifact has been successfully validated.
+    """
 
     artifact = build_calibration_artifact(
         data_dir=data_dir,
@@ -173,6 +181,46 @@ def build_and_save_calibration_artifact(
         location=location,
     )
 
-    artifact.save(output_path)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    temporary_path: Path | None = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            suffix=".tmp",
+            prefix=f".{output_path.stem}.",
+            dir=output_path.parent,
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+
+        artifact.save(temporary_path)
+
+        # Validate the serialized artifact before publication.
+        validated_artifact = CalibrationArtifact.load(
+            temporary_path
+        )
+
+        if (
+            validated_artifact.content_hash()
+            != artifact.content_hash()
+        ):
+            raise ValueError(
+                "Serialized calibration artifact does not match "
+                "the in-memory artifact."
+            )
+
+        os.replace(temporary_path, output_path)
+        temporary_path = None
+
+    finally:
+        if (
+            temporary_path is not None
+            and temporary_path.exists()
+        ):
+            temporary_path.unlink()
 
     return artifact
