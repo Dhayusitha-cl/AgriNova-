@@ -101,6 +101,149 @@ def test_sdk_can_execute_registered_second_location(tmp_path, monkeypatch):
     assert result.trace.crop_name == "cotton"
     assert result.trace.soil_type == "medium_black"
 
+def test_sdk_uses_active_calibration_and_supports_rollback(
+    tmp_path,
+    monkeypatch,
+):
+    calibration_dir = tmp_path / "calibration"
+    calibration_dir.mkdir()
+
+    registry_path = calibration_dir / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "entries": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    artifact_source = Path(
+        "data/calibration/yavatmal_rainfall_calibration_v1.json"
+    )
+    artifact_data = json.loads(
+        artifact_source.read_text(encoding="utf-8")
+    )
+
+    artifact_v1_data = dict(artifact_data)
+    artifact_v1_data["location"] = "lifecycle_location"
+    artifact_v1_data["calibration_method_version"] = "1.0"
+
+    artifact_v2_data = dict(artifact_data)
+    artifact_v2_data["location"] = "lifecycle_location"
+    artifact_v2_data["calibration_method_version"] = "2.0"
+
+    artifact_v1_path = calibration_dir / "lifecycle_location_v1.json"
+    artifact_v2_path = calibration_dir / "lifecycle_location_v2.json"
+
+    artifact_v1_path.write_text(
+        json.dumps(artifact_v1_data),
+        encoding="utf-8",
+    )
+    artifact_v2_path.write_text(
+        json.dumps(artifact_v2_data),
+        encoding="utf-8",
+    )
+
+
+    def activate_artifact(artifact_path):
+        monkeypatch.setitem(
+            CALIBRATION_ARTIFACTS,
+            "lifecycle_location",
+            CalibrationRegistryEntry(
+                artifact_path=artifact_path,
+                climate_source="imd_gridded_rainfall",
+                climate_grid_key="imd_gridded_rainfall:20.50:78.25",
+            ),
+        )
+
+    register_calibration(
+        registry_path=registry_path,
+        location_id="lifecycle_location",
+        artifact_path=artifact_v1_path,
+        climate_source="imd_gridded_rainfall",
+        climate_grid_key="imd_gridded_rainfall:20.50:78.25",
+    )
+
+    registry = json.loads(
+        registry_path.read_text(encoding="utf-8")
+    )
+    entry = registry["entries"]["lifecycle_location"]
+
+    activate_artifact(
+        calibration_dir / entry["artifact_path"]
+    )
+
+    client = CropLogicClient()
+
+    v1_result = client.assess_sowing(
+        location_id="lifecycle_location",
+        crop_name="cotton",
+        soil_type="medium_black",
+        current_moisture_mm=35.0,
+        rainfall_yesterday_mm=12.0,
+        start_date="2024-06-15",
+        num_simulations=10,
+        days_to_simulate=7,
+        random_seed=123,
+    )
+
+    v1_hash = v1_result.trace.calibration_artifact_id
+
+    register_calibration(
+        registry_path=registry_path,
+        location_id="lifecycle_location",
+        artifact_path=artifact_v2_path,
+        climate_source="imd_gridded_rainfall",
+        climate_grid_key="imd_gridded_rainfall:20.50:78.25",
+        overwrite=True,
+    )
+
+    activate_artifact(artifact_v2_path)
+
+    v2_result = client.assess_sowing(
+        location_id="lifecycle_location",
+        crop_name="cotton",
+        soil_type="medium_black",
+        current_moisture_mm=35.0,
+        rainfall_yesterday_mm=12.0,
+        start_date="2024-06-15",
+        num_simulations=10,
+        days_to_simulate=7,
+        random_seed=123,
+    )
+
+    v2_hash = v2_result.trace.calibration_artifact_id
+
+    assert v1_hash != v2_hash
+
+    register_calibration(
+        registry_path=registry_path,
+        location_id="lifecycle_location",
+        artifact_path=artifact_v1_path,
+        climate_source="imd_gridded_rainfall",
+        climate_grid_key="imd_gridded_rainfall:20.50:78.25",
+        overwrite=True,
+    )
+
+    activate_artifact(artifact_v1_path)
+
+    rollback_result = client.assess_sowing(
+        location_id="lifecycle_location",
+        crop_name="cotton",
+        soil_type="medium_black",
+        current_moisture_mm=35.0,
+        rainfall_yesterday_mm=12.0,
+        start_date="2024-06-15",
+        num_simulations=10,
+        days_to_simulate=7,
+        random_seed=123,
+    )
+
+    assert rollback_result.trace.calibration_artifact_id == v1_hash
+
+
 def test_api_can_execute_registered_second_location(tmp_path, monkeypatch):
     calibration_dir = tmp_path / "calibration"
     calibration_dir.mkdir()

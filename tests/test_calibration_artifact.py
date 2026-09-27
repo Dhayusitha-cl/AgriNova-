@@ -60,6 +60,18 @@ def make_test_artifact():
         fallback_transition_matrix=matrix.copy(),
     )
 
+def test_content_hash_is_stable_across_save_and_load(tmp_path):
+    artifact = make_test_artifact()
+    artifact_path = tmp_path / "calibration.json"
+
+    original_hash = artifact.content_hash()
+
+    artifact.save(artifact_path)
+
+    loaded_artifact = CalibrationArtifact.load(artifact_path)
+
+    assert loaded_artifact.content_hash() == original_hash
+
 
 def test_valid_artifact_passes_validation():
     artifact = make_test_artifact()

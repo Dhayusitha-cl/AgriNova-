@@ -68,10 +68,12 @@ class CalibrationArtifact:
 
     def content_hash(self) -> str:
         """
-        Return a deterministic SHA-256 identity for this artifact's content.
+        Return a deterministic SHA-256 identity for the serialized artifact.
 
-        The hash excludes the artifact identity itself so the identity
-        can be verified after loading.
+        The hash includes the artifact's serialized fields, including its
+        location, calibration metadata, transition matrices, and rainfall
+        samples. It is stable across save/load when the artifact content
+        is unchanged.
         """
         payload = self.to_dict()
 
