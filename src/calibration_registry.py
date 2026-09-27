@@ -161,6 +161,10 @@ def get_calibration_artifact_for_grid(
 
     Climate-grid identity is resolved independently from the public location
     identifier. An unknown grid never falls back to another calibration.
+
+    Multiple public locations may share one climate grid when they reference
+    the same calibration artifact. Conflicting artifacts for the same climate
+    grid are rejected as ambiguous.
     """
     if not isinstance(climate_source, str) or not climate_source.strip():
         raise ValueError("Climate source must not be empty.")
@@ -171,15 +175,37 @@ def get_calibration_artifact_for_grid(
     normalized_source = climate_source.strip().lower()
     normalized_grid_key = climate_grid_key.strip().lower()
 
-    for location, entry in CALIBRATION_ARTIFACTS.items():
+    matching_entries = [
+        (location, entry)
+        for location, entry in CALIBRATION_ARTIFACTS.items()
         if (
             entry.climate_source.strip().lower() == normalized_source
             and entry.climate_grid_key.strip().lower()
             == normalized_grid_key
-        ):
-            return get_calibration_artifact(location)
+        )
+    ]
 
-    raise ValueError(
-        "No calibration artifact is configured for climate grid "
-        f"'{climate_grid_key}' from source '{climate_source}'."
-    )
+    if not matching_entries:
+        raise ValueError(
+            "No calibration artifact is configured for climate grid "
+            f"'{climate_grid_key}' from source '{climate_source}'."
+        )
+
+    artifact_paths = {
+        entry.artifact_path
+        for _, entry in matching_entries
+    }
+
+    if len(artifact_paths) > 1:
+        locations = ", ".join(
+            location for location, _ in matching_entries
+        )
+        raise ValueError(
+            "Ambiguous calibration artifacts are configured for climate "
+            f"grid '{climate_grid_key}' from source '{climate_source}' "
+            f"across locations: {locations}."
+        )
+
+    location, _ = matching_entries[0]
+
+    return get_calibration_artifact(location)

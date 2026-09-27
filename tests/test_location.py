@@ -65,6 +65,23 @@ def test_resolves_to_nearest_grid_cell():
     assert result.source == "imd_gridded_rainfall"
     assert result.key == "imd_gridded_rainfall:20.50:78.00"
 
+
+def test_nearest_grid_tie_is_deterministic():
+    location = GeographicLocation(
+        latitude=20.375,
+        longitude=78.125,
+    )
+
+    result = resolve_climate_grid(
+        location,
+        [20.25, 20.50],
+        [78.00, 78.25],
+    )
+
+    assert result.latitude == 20.25
+    assert result.longitude == 78.00
+
+
 def test_exact_grid_coordinate_is_preserved():
     location = GeographicLocation(
         latitude=20.5,

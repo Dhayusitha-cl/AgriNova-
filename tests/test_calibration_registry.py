@@ -246,3 +246,57 @@ def test_registry_yavatmal_artifact_path_is_relative_to_calibration_package():
         "yavatmal_rainfall_calibration_v1.json"
     )
     assert entry.artifact_path.exists()
+
+def test_ambiguous_climate_grid_is_rejected(monkeypatch, tmp_path):
+    source = CALIBRATION_ARTIFACTS["yavatmal"].artifact_path
+    artifact_data = json.loads(
+        source.read_text(encoding="utf-8")
+    )
+
+    artifact_a = dict(artifact_data)
+    artifact_a["location"] = "location_a"
+
+    artifact_b = dict(artifact_data)
+    artifact_b["location"] = "location_b"
+
+    artifact_a_path = tmp_path / "location_a.json"
+    artifact_b_path = tmp_path / "location_b.json"
+
+    artifact_a_path.write_text(
+        json.dumps(artifact_a),
+        encoding="utf-8",
+    )
+    artifact_b_path.write_text(
+        json.dumps(artifact_b),
+        encoding="utf-8",
+    )
+
+    shared_grid = "imd_gridded_rainfall:20.50:78.25"
+
+    monkeypatch.setitem(
+        CALIBRATION_ARTIFACTS,
+        "location_a",
+        CalibrationRegistryEntry(
+            artifact_path=artifact_a_path,
+            climate_source="imd_gridded_rainfall",
+            climate_grid_key=shared_grid,
+        ),
+    )
+    monkeypatch.setitem(
+        CALIBRATION_ARTIFACTS,
+        "location_b",
+        CalibrationRegistryEntry(
+            artifact_path=artifact_b_path,
+            climate_source="imd_gridded_rainfall",
+            climate_grid_key=shared_grid,
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Ambiguous calibration artifacts",
+    ):
+        get_calibration_artifact_for_grid(
+            "imd_gridded_rainfall",
+            shared_grid,
+        )
