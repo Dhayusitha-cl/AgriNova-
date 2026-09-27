@@ -1,8 +1,16 @@
+import json
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
 from api import app
 from croplogic_saathi import CropLogicClient, DecisionResult
+from src.calibration_onboarding import register_calibration
+from src.calibration_registry import (
+    CALIBRATION_ARTIFACTS,
+    CalibrationRegistryEntry,
+)
 
 def test_sdk_returns_typed_decision_result():
     client = CropLogicClient()
@@ -20,6 +28,162 @@ def test_sdk_returns_typed_decision_result():
 
     assert isinstance(result, DecisionResult)
     assert result.decision in {"SOW TODAY", "WAIT", "SWITCH CROP"}
+
+def test_sdk_can_execute_registered_second_location(tmp_path, monkeypatch):
+    calibration_dir = tmp_path / "calibration"
+    calibration_dir.mkdir()
+
+    registry_path = calibration_dir / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "entries": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    artifact_source = Path(
+        "data/calibration/yavatmal_rainfall_calibration_v1.json"
+    )
+    artifact_data = json.loads(
+        artifact_source.read_text(encoding="utf-8")
+    )
+    artifact_data["location"] = "new_location"
+
+    artifact_path = calibration_dir / "new_location_v1.json"
+    artifact_path.write_text(
+        json.dumps(artifact_data),
+        encoding="utf-8",
+    )
+
+    register_calibration(
+        registry_path=registry_path,
+        location_id="new_location",
+        artifact_path=artifact_path,
+        climate_source="imd_gridded_rainfall",
+        climate_grid_key="imd_gridded_rainfall:20.50:78.25",
+    )
+
+    registry = json.loads(
+        registry_path.read_text(encoding="utf-8")
+    )
+    entry = registry["entries"]["new_location"]
+
+    monkeypatch.setitem(
+        CALIBRATION_ARTIFACTS,
+        "new_location",
+        CalibrationRegistryEntry(
+            artifact_path=calibration_dir / entry["artifact_path"],
+            climate_source=entry["climate_source"],
+            climate_grid_key=entry["climate_grid_key"],
+        ),
+    )
+
+    result = CropLogicClient().assess_sowing(
+        location_id="new_location",
+        crop_name="cotton",
+        soil_type="medium_black",
+        current_moisture_mm=35.0,
+        rainfall_yesterday_mm=12.0,
+        start_date="2024-06-15",
+        num_simulations=10,
+        days_to_simulate=7,
+        random_seed=123,
+    )
+
+    assert isinstance(result, DecisionResult)
+    assert result.trace.location_id == "new_location"
+    assert result.trace.calibration_schema_version == "1.0"
+    assert result.trace.calibration_artifact_type == "rainfall_calibration"
+    assert len(result.trace.calibration_artifact_id) == 64
+    assert result.trace.crop_name == "cotton"
+    assert result.trace.soil_type == "medium_black"
+
+def test_api_can_execute_registered_second_location(tmp_path, monkeypatch):
+    calibration_dir = tmp_path / "calibration"
+    calibration_dir.mkdir()
+
+    registry_path = calibration_dir / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "entries": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    artifact_source = Path(
+        "data/calibration/yavatmal_rainfall_calibration_v1.json"
+    )
+    artifact_data = json.loads(
+        artifact_source.read_text(encoding="utf-8")
+    )
+    artifact_data["location"] = "new_location"
+
+    artifact_path = calibration_dir / "new_location_v1.json"
+    artifact_path.write_text(
+        json.dumps(artifact_data),
+        encoding="utf-8",
+    )
+
+    register_calibration(
+        registry_path=registry_path,
+        location_id="new_location",
+        artifact_path=artifact_path,
+        climate_source="imd_gridded_rainfall",
+        climate_grid_key="imd_gridded_rainfall:20.50:78.25",
+    )
+
+    registry = json.loads(
+        registry_path.read_text(encoding="utf-8")
+    )
+    entry = registry["entries"]["new_location"]
+
+    monkeypatch.setitem(
+        CALIBRATION_ARTIFACTS,
+        "new_location",
+        CalibrationRegistryEntry(
+            artifact_path=calibration_dir / entry["artifact_path"],
+            climate_source=entry["climate_source"],
+            climate_grid_key=entry["climate_grid_key"],
+        ),
+    )
+
+    payload = {
+        "location_id": "new_location",
+        "crop_name": "cotton",
+        "soil_type": "medium_black",
+        "current_moisture_mm": 35.0,
+        "rainfall_yesterday_mm": 12.0,
+        "start_date": "2024-06-15",
+        "num_simulations": 10,
+        "days_to_simulate": 7,
+        "random_seed": 123,
+    }
+
+    response = TestClient(app).post(
+
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+
+    result = response.json()
+
+    assert result["trace"]["location_id"] == "new_location"
+    assert result["trace"]["calibration_schema_version"] == "1.0"
+    assert result["trace"]["calibration_artifact_type"] == (
+        "rainfall_calibration"
+    )
+    assert len(result["trace"]["calibration_artifact_id"]) == 64
+    assert result["trace"]["crop_name"] == "cotton"
+    assert result["trace"]["soil_type"] == "medium_black"
+
 
 def test_sdk_is_reproducible_with_same_request():
     payload = {
