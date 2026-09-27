@@ -532,3 +532,120 @@ def test_build_calibration_artifact_contains_provenance(tmp_path):
         artifact.calibration_method_version
         == CALIBRATION_METHOD_VERSION
     )
+
+def test_build_calibration_artifact_rejects_missing_calendar_day(
+    tmp_path,
+):
+    data_dir = make_processed_rainfall_files(tmp_path)
+
+    path = data_dir / "rainfall_test_2020.csv"
+    dataframe = pd.read_csv(path)
+
+    dataframe = dataframe.iloc[1:].copy()
+    dataframe.to_csv(path, index=False)
+
+    with pytest.raises(
+        ValueError,
+        match="every calendar day exactly once",
+    ):
+        build_calibration_artifact(
+            data_dir=data_dir,
+            pattern="rainfall_test_*.csv",
+            location="test_location",
+        )
+
+def test_build_calibration_artifact_rejects_duplicate_date(
+    tmp_path,
+):
+    data_dir = make_processed_rainfall_files(tmp_path)
+
+    path = data_dir / "rainfall_test_2020.csv"
+    dataframe = pd.read_csv(path)
+
+    duplicate = dataframe.iloc[[0]].copy()
+    dataframe = pd.concat(
+        [dataframe, duplicate],
+        ignore_index=True,
+    )
+
+    dataframe.to_csv(path, index=False)
+
+    with pytest.raises(
+        ValueError,
+        match="duplicate dates",
+    ):
+        build_calibration_artifact(
+            data_dir=data_dir,
+            pattern="rainfall_test_*.csv",
+            location="test_location",
+        )
+
+def test_build_calibration_artifact_rejects_invalid_rainfall_state(
+    tmp_path,
+):
+    data_dir = make_processed_rainfall_files(tmp_path)
+
+    path = data_dir / "rainfall_test_2020.csv"
+    dataframe = pd.read_csv(path)
+
+    dataframe.loc[0, "rainfall_state"] = "heavy_rain"
+    dataframe.to_csv(path, index=False)
+
+    with pytest.raises(
+        ValueError,
+        match="invalid rainfall states",
+    ):
+        build_calibration_artifact(
+            data_dir=data_dir,
+            pattern="rainfall_test_*.csv",
+            location="test_location",
+        )
+
+def test_build_calibration_artifact_rejects_state_mismatch(
+    tmp_path,
+):
+    data_dir = make_processed_rainfall_files(tmp_path)
+
+    path = data_dir / "rainfall_test_2020.csv"
+    dataframe = pd.read_csv(path)
+
+    dataframe.loc[0, "rainfall_mm"] = 20.0
+    dataframe.loc[0, "rainfall_state"] = "dry"
+    dataframe.to_csv(path, index=False)
+
+    with pytest.raises(
+        ValueError,
+        match="does not match rainfall amount",
+    ):
+        build_calibration_artifact(
+            data_dir=data_dir,
+            pattern="rainfall_test_*.csv",
+            location="test_location",
+        )
+
+def test_build_calibration_artifact_rejects_missing_historical_year(
+    tmp_path,
+):
+    data_dir = make_processed_rainfall_files(tmp_path)
+
+    source = data_dir / "rainfall_test_2021.csv"
+    missing_year = data_dir / "rainfall_test_2023.csv"
+
+    dataframe = pd.read_csv(source)
+    dataframe["date"] = (
+        pd.to_datetime(dataframe["date"])
+        + pd.DateOffset(years=2)
+    )
+    dataframe.to_csv(missing_year, index=False)
+
+    source.unlink()
+
+    with pytest.raises(
+        ValueError,
+        match="continuous calendar-year range",
+    ):
+        build_calibration_artifact(
+            data_dir=data_dir,
+            pattern="rainfall_test_*.csv",
+            location="test_location",
+        )

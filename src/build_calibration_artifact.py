@@ -29,8 +29,89 @@ from src.markov_calibration import (
 )
 from src.rainfall_amount_calibration import load_processed_rainfall
 
+from src.rainfall_preprocessing import (
+    validate_daily_rainfall_observations,
+)
+
 
 DEFAULT_DATA_DIR = "data/processed"
+
+def _validate_calibration_source_coverage(
+    rainfall_data: pd.DataFrame,
+    source_files: list[str],
+) -> None:
+    """
+    Validate the evidence coverage used to build a calibration artifact.
+
+    Structural artifact validation happens separately in
+    CalibrationArtifact.validate(). This function validates the processed
+    rainfall observations before calibration is performed.
+    """
+
+    if not source_files:
+        raise ValueError(
+            "No source rainfall files matched the supplied pattern."
+        )
+
+    required_columns = {
+        "date",
+        "rainfall_mm",
+        "rainfall_state",
+    }
+
+    missing_columns = required_columns.difference(
+        rainfall_data.columns
+    )
+
+    if missing_columns:
+        raise ValueError(
+            "Rainfall data is missing required columns: "
+            + ", ".join(sorted(missing_columns))
+        )
+
+    validated = validate_daily_rainfall_observations(
+        rainfall_data
+    )
+
+    if validated.empty:
+        raise ValueError(
+            "Cannot build calibration artifact from empty rainfall data."
+        )
+
+    years = sorted(
+        validated["date"].dt.year.unique().tolist()
+    )
+
+    expected_years = list(
+        range(years[0], years[-1] + 1)
+    )
+
+    if years != expected_years:
+        raise ValueError(
+            "Calibration source files must contain a continuous "
+            "calendar-year range."
+        )
+
+    for year in years:
+        year_data = validated[
+            validated["date"].dt.year == year
+        ]
+
+        expected_dates = pd.date_range(
+            start=f"{year}-01-01",
+            end=f"{year}-12-31",
+            freq="D",
+        )
+
+        actual_dates = pd.DatetimeIndex(
+            year_data["date"]
+        )
+
+        if not actual_dates.equals(expected_dates):
+            raise ValueError(
+                f"Calibration source data for year {year} "
+                "must contain every calendar day exactly once."
+            )
 
 
 def build_calibration_artifact(
@@ -54,37 +135,22 @@ def build_calibration_artifact(
         pattern=pattern,
     )
 
-    if rainfall_data.empty:
-        raise ValueError(
-            "Cannot build calibration artifact from empty rainfall data."
-        )
-
-    rainfall_data = rainfall_data.copy()
-
-    rainfall_data["date"] = pd.to_datetime(
-        rainfall_data["date"],
-        errors="raise",
+    source_files = sorted(
+        path.name
+        for path in data_dir.glob(pattern)
+        if path.is_file()
     )
 
-    rainfall_data = rainfall_data.sort_values(
-        "date"
-    ).reset_index(drop=True)
-
-    required_columns = {
-        "date",
-        "rainfall_mm",
-        "rainfall_state",
-    }
-
-    missing_columns = required_columns.difference(
-        rainfall_data.columns
+    _validate_calibration_source_coverage(
+        rainfall_data,
+        source_files,
     )
 
-    if missing_columns:
-        raise ValueError(
-            "Rainfall data is missing required columns: "
-            + ", ".join(sorted(missing_columns))
-        )
+    rainfall_data = (
+        rainfall_data
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
 
     fallback_matrix = calculate_transition_matrix(
         rainfall_data
@@ -127,17 +193,6 @@ def build_calibration_artifact(
                 )
 
             rainfall_samples[(month, state)] = values
-
-    source_files = sorted(
-        path.name
-        for path in data_dir.glob(pattern)
-        if path.is_file()
-    )
-
-    if not source_files:
-        raise ValueError(
-            "No source rainfall files matched the supplied pattern."
-        )
 
     artifact = CalibrationArtifact(
         location=location,
