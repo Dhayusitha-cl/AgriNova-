@@ -6,7 +6,11 @@ import pytest
 
 import src.calibration_onboarding as onboarding
 from src.calibration_onboarding import register_calibration
-
+from src.calibration_registry import (
+    CALIBRATION_ARTIFACTS,
+    CalibrationRegistryEntry,
+    get_calibration_artifact,
+)
 
 def _write_raw_file(raw_dir: Path, year: int) -> None:
     """Create a placeholder raw IMD file for the mocked preprocessing path."""
@@ -502,6 +506,72 @@ def test_register_calibration_rejects_duplicate_without_overwrite(
             climate_source="imd_gridded_rainfall",
             climate_grid_key="imd_gridded_rainfall:20.50:78.25",
         )
+
+def test_registered_second_location_can_be_loaded_at_runtime(
+    tmp_path,
+    monkeypatch,
+):
+    calibration_dir = tmp_path / "calibration"
+    calibration_dir.mkdir()
+
+    registry_path = calibration_dir / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "entries": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    artifact_source = Path(
+        "data/calibration/yavatmal_rainfall_calibration_v1.json"
+    )
+
+    artifact_data = json.loads(
+        artifact_source.read_text(encoding="utf-8")
+    )
+    artifact_data["location"] = "new_location"
+
+    artifact_path = calibration_dir / "new_location_v1.json"
+    artifact_path.write_text(
+        json.dumps(artifact_data),
+        encoding="utf-8",
+    )
+
+    register_calibration(
+        registry_path=registry_path,
+        location_id="new_location",
+        artifact_path=artifact_path,
+        climate_source="imd_gridded_rainfall",
+        climate_grid_key="imd_gridded_rainfall:20.50:78.25",
+    )
+
+    registry = json.loads(
+        registry_path.read_text(encoding="utf-8")
+    )
+
+    entry = registry["entries"]["new_location"]
+
+    monkeypatch.setitem(
+        CALIBRATION_ARTIFACTS,
+        "new_location",
+        CalibrationRegistryEntry(
+            artifact_path=calibration_dir / entry["artifact_path"],
+            climate_source=entry["climate_source"],
+            climate_grid_key=entry["climate_grid_key"],
+        ),
+    )
+
+    artifact = get_calibration_artifact("new_location")
+
+    assert artifact.location == "new_location"
+    assert (
+        CALIBRATION_ARTIFACTS["new_location"].climate_grid_key
+        == "imd_gridded_rainfall:20.50:78.25"
+    )
+
 
 def test_registration_does_not_mutate_runtime_registry():
     from src.calibration_registry import CALIBRATION_ARTIFACTS
