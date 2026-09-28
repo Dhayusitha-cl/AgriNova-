@@ -5,7 +5,7 @@ from importlib.resources import files
 from src.calibration_artifact import CalibrationArtifact
 
 
-REGISTRY_SCHEMA_VERSION = "1.0"
+REGISTRY_SCHEMA_VERSION = "1.1"
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,7 @@ class CalibrationRegistryEntry:
     artifact_path: object
     climate_source: str
     climate_grid_key: str
+    artifact_hash: str
 
 
 def _load_registry() -> dict[str, CalibrationRegistryEntry]:
@@ -43,6 +44,16 @@ def _load_registry() -> dict[str, CalibrationRegistryEntry]:
         raise ValueError(
             f"Invalid calibration registry JSON: {registry_path}"
         ) from exc
+
+
+    if data.get("schema_version") != REGISTRY_SCHEMA_VERSION:
+        raise ValueError(
+            "Unsupported calibration registry schema version: "
+            f"{data.get('schema_version')!r}"
+        )
+
+    entries = data.get("entries")
+
 
     if data.get("schema_version") != REGISTRY_SCHEMA_VERSION:
         raise ValueError(
@@ -72,6 +83,7 @@ def _load_registry() -> dict[str, CalibrationRegistryEntry]:
             )
 
         artifact_path = config.get("artifact_path")
+        artifact_hash = config.get("artifact_hash")
         climate_source = config.get("climate_source")
         climate_grid_key = config.get("climate_grid_key")
 
@@ -82,6 +94,15 @@ def _load_registry() -> dict[str, CalibrationRegistryEntry]:
             raise ValueError(
                 f"Registry entry '{location}' has an invalid "
                 "artifact_path."
+            )
+
+        if (
+            not isinstance(artifact_hash, str)
+            or not artifact_hash.strip()
+        ):
+            raise ValueError(
+                f"Registry entry '{location}' has an invalid "
+                "artifact_hash."
             )
 
         if (
@@ -106,6 +127,7 @@ def _load_registry() -> dict[str, CalibrationRegistryEntry]:
             artifact_path=calibration_dir / artifact_path,
             climate_source=climate_source,
             climate_grid_key=climate_grid_key,
+            artifact_hash=artifact_hash.strip().lower(),
         )
 
     return registry
@@ -147,6 +169,14 @@ def get_calibration_artifact(location: str) -> CalibrationArtifact:
         raise ValueError(
             f"Calibration artifact location mismatch: expected "
             f"'{normalized_location}', got '{artifact.location}'."
+        )
+
+    actual_hash = artifact.content_hash()
+
+    if actual_hash != entry.artifact_hash:
+        raise ValueError(
+            f"Calibration artifact hash mismatch for location "
+            f"'{normalized_location}'."
         )
 
     return artifact

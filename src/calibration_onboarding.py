@@ -18,6 +18,7 @@ from src.build_calibration_artifact import (
     build_and_save_calibration_artifact,
 )
 from src.calibration_artifact import CalibrationArtifact
+from src.calibration_registry import REGISTRY_SCHEMA_VERSION
 from src.process_imd_years import (
     process_year,
 )
@@ -199,6 +200,8 @@ def register_calibration(
             f"'{normalized_location}', got '{artifact.location}'."
         )
 
+    artifact_hash = artifact.content_hash()
+
     try:
         registry_data = json.loads(
             registry_path.read_text(encoding="utf-8")
@@ -208,7 +211,7 @@ def register_calibration(
             f"Invalid calibration registry JSON: {registry_path}"
         ) from exc
 
-    if registry_data.get("schema_version") != "1.0":
+    if registry_data.get("schema_version") != REGISTRY_SCHEMA_VERSION:
         raise ValueError(
             "Unsupported calibration registry schema version: "
             f"{registry_data.get('schema_version')!r}"
@@ -241,6 +244,7 @@ def register_calibration(
         "artifact_path": str(relative_artifact_path).replace("\\", "/"),
         "climate_source": normalized_source,
         "climate_grid_key": normalized_grid_key,
+        "artifact_hash": artifact_hash,
     }
 
     serialized = json.dumps(

@@ -6,6 +6,7 @@ import pytest
 
 import src.calibration_onboarding as onboarding
 from src.calibration_onboarding import register_calibration
+from src.calibration_artifact import CalibrationArtifact
 from src.calibration_registry import (
     CALIBRATION_ARTIFACTS,
     CalibrationRegistryEntry,
@@ -382,7 +383,7 @@ def test_register_calibration_adds_new_location(tmp_path):
     registry_path.write_text(
         json.dumps(
             {
-                "schema_version": "1.0",
+                "schema_version": "1.1",
                 "entries": {},
             }
         ),
@@ -404,6 +405,10 @@ def test_register_calibration_adds_new_location(tmp_path):
         encoding="utf-8",
     )
 
+    expected_hash = CalibrationArtifact.load(
+        artifact_path
+    ).content_hash()
+
     register_calibration(
         registry_path=registry_path,
         location_id="new_location",
@@ -420,6 +425,7 @@ def test_register_calibration_adds_new_location(tmp_path):
         "artifact_path": "new_location_v1.json",
         "climate_source": "imd_gridded_rainfall",
         "climate_grid_key": "imd_gridded_rainfall:20.50:78.25",
+        "artifact_hash": expected_hash,
     }
 
 
@@ -431,7 +437,7 @@ def test_register_calibration_rejects_location_mismatch(tmp_path):
     registry_path.write_text(
         json.dumps(
             {
-                "schema_version": "1.0",
+                "schema_version": "1.1",
                 "entries": {},
             }
         ),
@@ -468,7 +474,7 @@ def test_register_calibration_rejects_duplicate_without_overwrite(
     registry_path.write_text(
         json.dumps(
             {
-                "schema_version": "1.0",
+                "schema_version": "1.1",
                 "entries": {
                     "new_location": {
                         "artifact_path": "existing.json",
@@ -518,7 +524,7 @@ def test_registered_second_location_can_be_loaded_at_runtime(
     registry_path.write_text(
         json.dumps(
             {
-                "schema_version": "1.0",
+                "schema_version": "1.1",
                 "entries": {},
             }
         ),
@@ -554,6 +560,10 @@ def test_registered_second_location_can_be_loaded_at_runtime(
 
     entry = registry["entries"]["new_location"]
 
+    assert entry["artifact_hash"] == CalibrationArtifact.load(
+        artifact_path
+    ).content_hash()
+
     monkeypatch.setitem(
         CALIBRATION_ARTIFACTS,
         "new_location",
@@ -561,6 +571,7 @@ def test_registered_second_location_can_be_loaded_at_runtime(
             artifact_path=calibration_dir / entry["artifact_path"],
             climate_source=entry["climate_source"],
             climate_grid_key=entry["climate_grid_key"],
+            artifact_hash=entry["artifact_hash"],
         ),
     )
 

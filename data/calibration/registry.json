@@ -1,10 +1,11 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "entries": {
     "yavatmal": {
       "artifact_path": "yavatmal_rainfall_calibration_v1.json",
       "climate_source": "imd_gridded_rainfall",
-      "climate_grid_key": "imd_gridded_rainfall:20.50:78.25"
+      "climate_grid_key": "imd_gridded_rainfall:20.50:78.25",
+      "artifact_hash": "7211729434149487a1913e1bfc2ebe77d66b93fa7fdbefb13dc0a74dec63ac4d"
     }
   }
 }

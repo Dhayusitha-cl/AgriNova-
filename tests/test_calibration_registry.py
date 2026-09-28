@@ -8,6 +8,7 @@ from importlib.resources import files
 
 from src.imd_data import resolve_imd_climate_grid
 from src.location import GeographicLocation, resolve_climate_grid
+from src.calibration_artifact import CalibrationArtifact
 from src.calibration_registry import (
     CALIBRATION_ARTIFACTS,
     CalibrationRegistryEntry,
@@ -52,6 +53,7 @@ def test_missing_artifact_is_rejected(monkeypatch, tmp_path):
             artifact_path=tmp_path / "missing.json",
             climate_source="test_source",
             climate_grid_key="test_source:test",
+            artifact_hash="missing-hash",
         ),
     )
 
@@ -67,6 +69,9 @@ def test_artifact_location_mismatch_is_rejected(monkeypatch, tmp_path):
     source = CALIBRATION_ARTIFACTS["yavatmal"].artifact_path
     artifact_data = json.loads(source.read_text(encoding="utf-8"))
     artifact_data["location"] = "other_location"
+    artifact_hash = (
+        CalibrationArtifact.from_dict(artifact_data).content_hash()
+    )
 
     artifact_path.write_text(
         json.dumps(artifact_data),
@@ -80,11 +85,47 @@ def test_artifact_location_mismatch_is_rejected(monkeypatch, tmp_path):
             artifact_path=artifact_path,
             climate_source="imd_gridded_rainfall",
             climate_grid_key="imd_gridded_rainfall:20.50:78.25",
+            artifact_hash=artifact_hash,
         ),
     )
 
     with pytest.raises(ValueError, match="location mismatch"):
         get_calibration_artifact("yavatmal")
+
+def test_artifact_hash_mismatch_is_rejected(monkeypatch, tmp_path):
+    source = CALIBRATION_ARTIFACTS["yavatmal"].artifact_path
+    artifact_data = json.loads(
+        source.read_text(encoding="utf-8")
+    )
+
+    # Keep the artifact structurally valid but change its content.
+    artifact_data["source_end_date"] = "2024-12-30"
+
+    artifact_path = tmp_path / "modified_artifact.json"
+    artifact_path.write_text(
+        json.dumps(artifact_data),
+        encoding="utf-8",
+    )
+
+    original_hash = CALIBRATION_ARTIFACTS["yavatmal"].artifact_hash
+
+    monkeypatch.setitem(
+        CALIBRATION_ARTIFACTS,
+        "yavatmal",
+        CalibrationRegistryEntry(
+            artifact_path=artifact_path,
+            climate_source="imd_gridded_rainfall",
+            climate_grid_key="imd_gridded_rainfall:20.50:78.25",
+            artifact_hash=original_hash,
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Calibration artifact hash mismatch",
+    ):
+        get_calibration_artifact("yavatmal")
+
 
 def test_yavatmal_registry_contains_climate_metadata():
     entry = CALIBRATION_ARTIFACTS["yavatmal"]
@@ -280,6 +321,7 @@ def test_ambiguous_climate_grid_is_rejected(monkeypatch, tmp_path):
             artifact_path=artifact_a_path,
             climate_source="imd_gridded_rainfall",
             climate_grid_key=shared_grid,
+            artifact_hash="artifact-a-hash",
         ),
     )
     monkeypatch.setitem(
@@ -289,6 +331,7 @@ def test_ambiguous_climate_grid_is_rejected(monkeypatch, tmp_path):
             artifact_path=artifact_b_path,
             climate_source="imd_gridded_rainfall",
             climate_grid_key=shared_grid,
+            artifact_hash="artifact-b-hash",
         ),
     )
 

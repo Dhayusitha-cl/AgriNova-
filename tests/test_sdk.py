@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from api import app
 from croplogic_saathi import CropLogicClient, DecisionResult
 from src.calibration_onboarding import register_calibration
+from src.calibration_artifact import CalibrationArtifact
 from src.calibration_registry import (
     CALIBRATION_ARTIFACTS,
     CalibrationRegistryEntry,
@@ -37,7 +38,7 @@ def test_sdk_can_execute_registered_second_location(tmp_path, monkeypatch):
     registry_path.write_text(
         json.dumps(
             {
-                "schema_version": "1.0",
+                "schema_version": "1.1",
                 "entries": {},
             }
         ),
@@ -78,6 +79,9 @@ def test_sdk_can_execute_registered_second_location(tmp_path, monkeypatch):
             artifact_path=calibration_dir / entry["artifact_path"],
             climate_source=entry["climate_source"],
             climate_grid_key=entry["climate_grid_key"],
+            artifact_hash=CalibrationArtifact.load(
+                artifact_path
+            ).content_hash(),
         ),
     )
 
@@ -112,7 +116,7 @@ def test_sdk_uses_active_calibration_and_supports_rollback(
     registry_path.write_text(
         json.dumps(
             {
-                "schema_version": "1.0",
+                "schema_version": "1.1",
                 "entries": {},
             }
         ),
@@ -155,6 +159,7 @@ def test_sdk_uses_active_calibration_and_supports_rollback(
                 artifact_path=artifact_path,
                 climate_source="imd_gridded_rainfall",
                 climate_grid_key="imd_gridded_rainfall:20.50:78.25",
+                artifact_hash=CalibrationArtifact.load(artifact_path).content_hash(),
             ),
         )
 
@@ -252,7 +257,7 @@ def test_api_can_execute_registered_second_location(tmp_path, monkeypatch):
     registry_path.write_text(
         json.dumps(
             {
-                "schema_version": "1.0",
+                "schema_version": "1.1",
                 "entries": {},
             }
         ),
@@ -293,6 +298,9 @@ def test_api_can_execute_registered_second_location(tmp_path, monkeypatch):
             artifact_path=calibration_dir / entry["artifact_path"],
             climate_source=entry["climate_source"],
             climate_grid_key=entry["climate_grid_key"],
+            artifact_hash=CalibrationArtifact.load(
+                artifact_path
+            ).content_hash(),
         ),
     )
 
