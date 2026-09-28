@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass
 from importlib.resources import files
 
@@ -54,15 +55,6 @@ def _load_registry() -> dict[str, CalibrationRegistryEntry]:
 
     entries = data.get("entries")
 
-
-    if data.get("schema_version") != REGISTRY_SCHEMA_VERSION:
-        raise ValueError(
-            "Unsupported calibration registry schema version: "
-            f"{data.get('schema_version')!r}"
-        )
-
-    entries = data.get("entries")
-
     if not isinstance(entries, dict):
         raise ValueError(
             "Calibration registry 'entries' must be an object."
@@ -96,9 +88,23 @@ def _load_registry() -> dict[str, CalibrationRegistryEntry]:
                 "artifact_path."
             )
 
+        resolved_artifact_path = (
+            calibration_dir / artifact_path.strip()
+        ).resolve()
+
+        try:
+            resolved_artifact_path.relative_to(
+                calibration_dir.resolve()
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"Registry entry '{location}' has an artifact_path "
+                "outside the calibration directory."
+            ) from exc
+
         if (
             not isinstance(artifact_hash, str)
-            or not artifact_hash.strip()
+            or not re.fullmatch(r"[0-9a-fA-F]{64}", artifact_hash.strip())
         ):
             raise ValueError(
                 f"Registry entry '{location}' has an invalid "
@@ -123,8 +129,16 @@ def _load_registry() -> dict[str, CalibrationRegistryEntry]:
                 "climate_grid_key."
             )
 
+        normalized_location = location.strip().lower()
+
+        if normalized_location in registry:
+            raise ValueError(
+                "Calibration registry contains duplicate normalized "
+                f"location ID '{normalized_location}'."
+            )
+
         registry[location.strip().lower()] = CalibrationRegistryEntry(
-            artifact_path=calibration_dir / artifact_path,
+            artifact_path=resolved_artifact_path,
             climate_source=climate_source,
             climate_grid_key=climate_grid_key,
             artifact_hash=artifact_hash.strip().lower(),
@@ -192,9 +206,9 @@ def get_calibration_artifact_for_grid(
     Climate-grid identity is resolved independently from the public location
     identifier. An unknown grid never falls back to another calibration.
 
-    Multiple public locations may share one climate grid when they reference
-    the same calibration artifact. Conflicting artifacts for the same climate
-    grid are rejected as ambiguous.
+    Multiple public locations may currently resolve to the same climate grid,
+    but each registered artifact remains location-specific. Conflicting
+    artifacts for the same climate grid are rejected as ambiguous.
     """
     if not isinstance(climate_source, str) or not climate_source.strip():
         raise ValueError("Climate source must not be empty.")

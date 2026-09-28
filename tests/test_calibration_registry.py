@@ -343,3 +343,160 @@ def test_ambiguous_climate_grid_is_rejected(monkeypatch, tmp_path):
             "imd_gridded_rainfall",
             shared_grid,
         )
+
+def _write_test_registry(tmp_path, entries):
+    data_dir = tmp_path / "data"
+    calibration_dir = data_dir / "calibration"
+    calibration_dir.mkdir(parents=True)
+
+    registry_path = calibration_dir / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.1",
+                "entries": entries,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    return data_dir
+
+
+def test_registry_rejects_invalid_artifact_hash(
+    tmp_path,
+    monkeypatch,
+):
+    data_dir = _write_test_registry(
+        tmp_path,
+        {
+            "test_location": {
+                "artifact_path": "artifact.json",
+                "climate_source": "imd_gridded_rainfall",
+                "climate_grid_key": (
+                    "imd_gridded_rainfall:20.50:78.25"
+                ),
+                "artifact_hash": "not-a-sha256-hash",
+            }
+        },
+    )
+
+    monkeypatch.setattr(
+        "src.calibration_registry.files",
+        lambda package: data_dir,
+    )
+
+    import src.calibration_registry as registry_module
+
+    with pytest.raises(
+        ValueError,
+        match="invalid artifact_hash",
+    ):
+        registry_module._load_registry()
+
+
+def test_registry_normalizes_uppercase_artifact_hash(
+    tmp_path,
+    monkeypatch,
+):
+    artifact_hash = "A" * 64
+
+    data_dir = _write_test_registry(
+        tmp_path,
+        {
+            "test_location": {
+                "artifact_path": "artifact.json",
+                "climate_source": "imd_gridded_rainfall",
+                "climate_grid_key": (
+                    "imd_gridded_rainfall:20.50:78.25"
+                ),
+                "artifact_hash": artifact_hash,
+            }
+        },
+    )
+
+    monkeypatch.setattr(
+        "src.calibration_registry.files",
+        lambda package: data_dir,
+    )
+
+    import src.calibration_registry as registry_module
+
+    registry = registry_module._load_registry()
+
+    assert (
+        registry["test_location"].artifact_hash
+        == artifact_hash.lower()
+    )
+
+
+def test_registry_rejects_artifact_path_outside_calibration_directory(
+    tmp_path,
+    monkeypatch,
+):
+    data_dir = _write_test_registry(
+        tmp_path,
+        {
+            "test_location": {
+                "artifact_path": "../outside.json",
+                "climate_source": "imd_gridded_rainfall",
+                "climate_grid_key": (
+                    "imd_gridded_rainfall:20.50:78.25"
+                ),
+                "artifact_hash": "a" * 64,
+            }
+        },
+    )
+
+    monkeypatch.setattr(
+        "src.calibration_registry.files",
+        lambda package: data_dir,
+    )
+
+    import src.calibration_registry as registry_module
+
+    with pytest.raises(
+        ValueError,
+        match="outside the calibration directory",
+    ):
+        registry_module._load_registry()
+
+
+def test_registry_rejects_normalized_duplicate_location_ids(
+    tmp_path,
+    monkeypatch,
+):
+    data_dir = _write_test_registry(
+        tmp_path,
+        {
+            "Test_Location": {
+                "artifact_path": "artifact_a.json",
+                "climate_source": "imd_gridded_rainfall",
+                "climate_grid_key": (
+                    "imd_gridded_rainfall:20.50:78.25"
+                ),
+                "artifact_hash": "a" * 64,
+            },
+            " test_location ": {
+                "artifact_path": "artifact_b.json",
+                "climate_source": "imd_gridded_rainfall",
+                "climate_grid_key": (
+                    "imd_gridded_rainfall:20.50:78.25"
+                ),
+                "artifact_hash": "b" * 64,
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        "src.calibration_registry.files",
+        lambda package: data_dir,
+    )
+
+    import src.calibration_registry as registry_module
+
+    with pytest.raises(
+        ValueError,
+        match="duplicate normalized location ID",
+    ):
+        registry_module._load_registry()
