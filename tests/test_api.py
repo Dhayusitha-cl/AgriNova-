@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
+from api import DecisionRequest, app
 
-from api import app
 import pytest
 import json
 
@@ -94,10 +94,14 @@ def test_invalid_crop():
 
     response = client.post(
         "/api/v1/decision",
-        json=payload
+        json=payload,
     )
 
     assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "code": "UNKNOWN_CROP",
+        "message": "Unknown crop: banana",
+    }
 
 
 def test_invalid_soil():
@@ -139,6 +143,9 @@ def test_negative_moisture():
     )
 
     assert response.status_code == 422
+
+
+
 def test_rounded_transition_matrix_returns_400():
     payload = valid_payload()
 
@@ -197,6 +204,47 @@ def test_decision_success_with_production_calibration():
     assert "germ_prob_today" in data
     assert "germ_prob_wait" in data
     assert "germ_prob_soybean" in data
+
+def test_decision_success_with_coordinate_calibration(monkeypatch):
+    payload = valid_payload()
+
+    payload.pop("location_id")
+    payload.pop("transition_matrix")
+
+    payload["latitude"] = 20.50
+    payload["longitude"] = 78.25
+    payload["start_date"] = "2024-06-15"
+
+    monkeypatch.setenv(
+        "CROPLOGIC_IMD_RAINFALL_DATASET",
+        "data/raw/RF25_ind2024_rfp25.nc",
+    )
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+    trace = data["trace"]
+
+    assert trace["location_id"] is None
+    assert trace["latitude"] == 20.50
+    assert trace["longitude"] == 78.25
+
+    assert trace["climate_source"] == "imd_gridded_rainfall"
+    assert trace["climate_grid_key"] == (
+        "imd_gridded_rainfall:20.50:78.25"
+    )
+
+    assert trace["calibration_schema_version"] is not None
+    assert trace["calibration_artifact_type"] == "rainfall_calibration"
+    assert trace["calibration_artifact_id"] == (
+        "7211729434149487a1913e1bfc2ebe77d66b93fa7fdbefb13dc0a74dec63ac4d"
+    )
+
 
 def test_decision_rejects_unknown_location():
     payload = valid_payload()
@@ -354,6 +402,7 @@ def test_decision_requires_start_date_without_transition_matrix():
         "message": "Either transition_matrix or start_date must be provided.",
     }
 
+
 @pytest.mark.parametrize(
     "bad_value",
     [
@@ -362,8 +411,6 @@ def test_decision_requires_start_date_without_transition_matrix():
         float("-inf"),
     ],
 )
-
-
 def test_non_finite_transition_matrix_returns_400(bad_value):
     payload = valid_payload()
     payload["transition_matrix"][0][0] = bad_value
@@ -450,3 +497,56 @@ def test_invalid_date_has_structured_error():
         "start_date" in error["loc"]
         for error in detail["errors"]
     )
+
+def test_coordinate_location_source_is_valid():
+    payload = valid_payload()
+    payload.pop("location_id")
+
+    payload["latitude"] = 20.50
+    payload["longitude"] = 78.25
+
+    request = DecisionRequest(**payload)
+
+    assert request.location_id is None
+    assert request.latitude == 20.50
+    assert request.longitude == 78.25
+
+def test_coordinate_calibration_requires_configured_dataset(monkeypatch):
+    payload = valid_payload()
+
+    payload.pop("location_id")
+    payload.pop("transition_matrix")
+
+    payload["latitude"] = 20.50
+    payload["longitude"] = 78.25
+    payload["start_date"] = "2024-06-15"
+
+    monkeypatch.delenv(
+        "CROPLOGIC_IMD_RAINFALL_DATASET",
+        raising=False,
+    )
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 400
+
+    detail = response.json()["detail"]
+
+    assert detail["code"] == "CALIBRATION_UNAVAILABLE"
+    assert "CROPLOGIC_IMD_RAINFALL_DATASET" in detail["message"]
+
+def test_decision_rejects_mixed_location_sources():
+    payload = valid_payload()
+
+    payload["latitude"] = 20.50
+    payload["longitude"] = 78.25
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 422

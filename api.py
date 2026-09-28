@@ -5,7 +5,7 @@ from datetime import date
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.calibration_artifact import ARTIFACT_SCHEMA_VERSION
 from croplogic_saathi.models import (
@@ -14,13 +14,18 @@ from croplogic_saathi.models import (
     EconomicOutcome,
     DecisionTrace,
 )
-
-logger = logging.getLogger("croplogic_saathi")
-
 from src.crop_data import crops
 from src.soil_data import soils
 from src.decision_engine import make_decision
 from src.calibration_registry import get_calibration_artifact
+from src.climate_data_provider import create_configured_climate_data_provider
+from src.location import GeographicLocation
+from src.runtime_calibration import resolve_calibration_resolution_from_provider
+
+
+logger = logging.getLogger("croplogic_saathi")
+
+
 
 app = FastAPI(
     title="CropLogic-Saathi API",
@@ -73,7 +78,26 @@ async def request_validation_exception_handler(
 # ---------------------------------------------------------
 
 class DecisionRequest(BaseModel):
-    location_id: str = Field(min_length=1, max_length=100)
+    location_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=100,
+    )
+
+    latitude: float | None = Field(
+        default=None,
+        ge=-90,
+        le=90,
+        allow_inf_nan=False,
+    )
+
+    longitude: float | None = Field(
+        default=None,
+        ge=-180,
+        le=180,
+        allow_inf_nan=False,
+    )
+
     crop_name: str = Field(min_length=1, max_length=50)
     soil_type: str = Field(min_length=1, max_length=50)
     current_moisture_mm: float = Field(
@@ -96,6 +120,25 @@ class DecisionRequest(BaseModel):
         ge=0,
         le=2**31 - 1,
     )
+
+    @model_validator(mode="after")
+    def validate_location_source(self):
+        has_location_id = self.location_id is not None
+        has_latitude = self.latitude is not None
+        has_longitude = self.longitude is not None
+
+        if has_location_id and (has_latitude or has_longitude):
+            raise ValueError(
+                "Provide either location_id or latitude and longitude, "
+                "not both."
+            )
+
+        if not has_location_id and not (has_latitude and has_longitude):
+            raise ValueError(
+                "Provide either location_id or both latitude and longitude."
+            )
+
+        return self
 
 class MoistureSummary(BaseModel):
     mean: list[float]
@@ -284,12 +327,37 @@ def decision(request: DecisionRequest):
         )
 
         calibration_artifact = None
+        climate_source = None
+        climate_grid_key = None
 
         if request.transition_matrix is None:
             try:
-                calibration_artifact = get_calibration_artifact(
-                    request.location_id
-                )
+                if request.location_id is not None:
+                    calibration_artifact = get_calibration_artifact(
+                        request.location_id
+                    )
+
+                else:
+                    location = GeographicLocation(
+                        latitude=request.latitude,
+                        longitude=request.longitude,
+                    )
+
+                    climate_provider = (
+                        create_configured_climate_data_provider()
+                    )
+
+                    resolution = (
+                        resolve_calibration_resolution_from_provider(
+                            location=location,
+                            climate_provider=climate_provider,
+                        )
+                    )
+
+                    calibration_artifact = resolution.artifact
+                    climate_source = resolution.climate_grid.source
+                    climate_grid_key = resolution.climate_grid.key
+
             except (ValueError, FileNotFoundError) as exc:
                 raise _api_error(
                     400,
@@ -316,6 +384,10 @@ def decision(request: DecisionRequest):
 
         trace = DecisionTrace(
             location_id=request.location_id,
+            latitude=request.latitude,
+            longitude=request.longitude,
+            climate_source=climate_source,
+            climate_grid_key=climate_grid_key,
             calibration_schema_version=(
                 ARTIFACT_SCHEMA_VERSION
                 if calibration_artifact is not None
@@ -350,8 +422,11 @@ def decision(request: DecisionRequest):
             "DECISION_VALIDATION_ERROR",
             str(exc),
         ) from exc
+
     except Exception:
-        logger.exception("Unexpected error while processing decision request")
+        logger.exception(
+            "Unexpected error while processing decision request"
+        )
         raise _api_error(
             500,
             "INTERNAL_ERROR",

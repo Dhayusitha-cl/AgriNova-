@@ -11,7 +11,8 @@ The provider does not perform calibration or make decisions.
 
 from pathlib import Path
 
-import xarray as xr
+from src.imd_data import open_rainfall_dataset
+from src.runtime_config import get_imd_rainfall_dataset_path
 
 
 class ClimateDataProvider:
@@ -52,4 +53,15 @@ class IMDClimateDataProvider(ClimateDataProvider):
     def get_dataset(self):
         """Open and return the configured IMD rainfall dataset."""
 
-        return xr.open_dataset(self._dataset_path)
+        return open_rainfall_dataset(self._dataset_path)
+
+
+def create_configured_climate_data_provider() -> ClimateDataProvider:
+    """Create the configured IMD climate-data provider.
+
+    Runtime configuration determines which authoritative IMD dataset
+    is supplied to the provider.
+    """
+    dataset_path = get_imd_rainfall_dataset_path()
+
+    return IMDClimateDataProvider(dataset_path)

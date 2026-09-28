@@ -31,7 +31,14 @@ class Assumptions(BaseModel):
 
 
 class DecisionTrace(BaseModel):
-    location_id: str
+    location_id: str | None = None
+
+    latitude: float | None = None
+    longitude: float | None = None
+
+    climate_source: str | None = None
+    climate_grid_key: str | None = None
+
     calibration_schema_version: str | None
     calibration_artifact_type: str | None
     calibration_artifact_id: str | None
