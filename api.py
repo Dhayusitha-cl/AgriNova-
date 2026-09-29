@@ -1,6 +1,6 @@
 import logging
 import math
-from datetime import date
+from datetime import date, datetime
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -21,6 +21,7 @@ from src.calibration_registry import get_calibration_artifact
 from src.climate_data_provider import create_configured_climate_data_provider
 from src.location import GeographicLocation
 from src.runtime_calibration import resolve_calibration_resolution_from_provider
+from src.forecast import DailyForecast, WeatherForecast
 
 
 logger = logging.getLogger("croplogic_saathi")
@@ -76,6 +77,45 @@ async def request_validation_exception_handler(
 # ---------------------------------------------------------
 # REQUEST MODEL
 # ---------------------------------------------------------
+class DailyForecastRequest(BaseModel):
+    forecast_date: date
+    rainfall_mm: float = Field(
+        ge=0,
+        le=1000,
+        allow_inf_nan=False,
+    )
+    precipitation_probability: float = Field(
+        ge=0,
+        le=1,
+        allow_inf_nan=False,
+    )
+
+
+class WeatherForecastRequest(BaseModel):
+    source: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+    issued_at: datetime
+    daily: list[DailyForecastRequest] = Field(
+        min_length=1,
+        max_length=30,
+    )
+
+    def to_domain(self) -> WeatherForecast:
+        return WeatherForecast(
+            source=self.source,
+            issued_at=self.issued_at,
+            daily=tuple(
+                DailyForecast(
+                    forecast_date=item.forecast_date,
+                    rainfall_mm=item.rainfall_mm,
+                    precipitation_probability=item.precipitation_probability,
+                )
+                for item in self.daily
+            ),
+        )
+
 
 class DecisionRequest(BaseModel):
     location_id: str | None = Field(
@@ -119,6 +159,15 @@ class DecisionRequest(BaseModel):
         default=42,
         ge=0,
         le=2**31 - 1,
+    )
+
+
+    forecast: WeatherForecastRequest | None = None
+    forecast_weight: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        allow_inf_nan=False,
     )
 
     @model_validator(mode="after")
@@ -364,6 +413,11 @@ def decision(request: DecisionRequest):
                     "CALIBRATION_UNAVAILABLE",
                     str(exc),
                 ) from exc
+        forecast = (
+            request.forecast.to_domain()
+            if request.forecast is not None
+            else None
+        )
 
         result = make_decision(
             crop_name=request.crop_name,
@@ -380,6 +434,8 @@ def decision(request: DecisionRequest):
                 else None
             ),
             calibration_artifact=calibration_artifact,
+            forecast=forecast,
+            forecast_weight=request.forecast_weight,
         )
 
         trace = DecisionTrace(

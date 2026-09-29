@@ -12,6 +12,10 @@ import numpy as np
 
 from src.weather_simulator import generate_rainfall_scenario
 from src.calibration_artifact import CalibrationArtifact
+from src.forecast import WeatherForecast
+from src.forecast_conditioning import (
+    condition_rainfall_state_probabilities,
+)
 
 def generate_calibrated_monte_carlo_scenarios(
     start_date,
@@ -21,6 +25,8 @@ def generate_calibrated_monte_carlo_scenarios(
     random_seed=None,
     rainfall_data=None,
     calibration_artifact=None,
+    forecast=None,
+    forecast_weight=None,
 ):
     """
     Generate multiple rainfall scenarios using calibrated
@@ -60,6 +66,53 @@ def generate_calibrated_monte_carlo_scenarios(
         )
 
     simulation_start = pd.Timestamp(start_date)
+
+    if forecast is not None:
+        if not isinstance(forecast, WeatherForecast):
+            raise TypeError(
+                "forecast must be a WeatherForecast instance."
+            )
+
+
+        if forecast_weight is None:
+            raise ValueError(
+                "forecast_weight must be provided when "
+                "forecast is supplied."
+            )
+
+    elif forecast_weight is not None:
+        raise ValueError(
+            "forecast_weight cannot be provided without forecast."
+        )
+
+    simulation_end = (
+        simulation_start
+        + pd.Timedelta(days=num_days - 1)
+    )
+
+    if forecast is not None:
+        forecast_dates = {
+            entry.forecast_date
+            for entry in forecast.daily
+        }
+
+        required_dates = {
+            timestamp.date()
+            for timestamp in pd.date_range(
+                simulation_start,
+                simulation_end,
+                freq="D",
+            )
+        }
+
+        missing_dates = required_dates - forecast_dates
+
+        if missing_dates:
+            raise ValueError(
+                "Forecast is missing dates required by the "
+                f"simulation horizon: "
+                f"{sorted(missing_dates)}"
+            )
 
         # ---------------------------------------------------------
     # CALIBRATION INPUTS
@@ -137,7 +190,7 @@ def generate_calibrated_monte_carlo_scenarios(
 
                 rainfall_samples[(month, state)] = values
 
-    # ---------------------------------------------------------
+       # ---------------------------------------------------------
     # MONTE CARLO
     # ---------------------------------------------------------
 
@@ -147,15 +200,21 @@ def generate_calibrated_monte_carlo_scenarios(
 
     states = ["dry", "drizzle", "rain"]
 
-    for _ in range(num_simulations):
+    forecast_by_date = {}
 
+    if forecast is not None:
+        forecast_by_date = {
+            entry.forecast_date: entry
+            for entry in forecast.daily
+        }
+
+    for _ in range(num_simulations):
         current_state = initial_state
         simulation_date = simulation_start
 
         scenario = []
 
         for day in range(num_days):
-
             month = simulation_date.month
 
             matrix = monthly_matrices[month]
@@ -166,20 +225,46 @@ def generate_calibrated_monte_carlo_scenarios(
 
             if day == 0:
                 simulated_state = current_state
+
             else:
+                state_probabilities = {
+                    "dry": float(matrix[current_index][0]),
+                    "drizzle": float(matrix[current_index][1]),
+                    "rain": float(matrix[current_index][2]),
+                }
+
+                forecast_entry = forecast_by_date.get(
+                    simulation_date.date()
+                )
+
+                if forecast_entry is not None:
+                    state_probabilities = (
+                        condition_rainfall_state_probabilities(
+                            historical_probabilities=state_probabilities,
+                            forecast_probability=(
+                                forecast_entry
+                                .precipitation_probability
+                            ),
+                            forecast_weight=forecast_weight,
+                        )
+                    )
+
+                next_probabilities = [
+                    state_probabilities[state]
+                    for state in states
+                ]
+
                 next_index = rng.choice(
                     len(states),
-                    p=matrix[current_index],
+                    p=next_probabilities,
                 )
 
                 simulated_state = states[next_index]
 
             if simulated_state == "dry":
-
                 rainfall = 0.0
 
             else:
-
                 values = rainfall_samples[
                     (month, simulated_state)
                 ]

@@ -1,6 +1,8 @@
 import numpy as np
+import pandas as pd
 import pytest
 
+from datetime import datetime
 from src.decision_engine import (
     calculate_daily_et,
     _get_initial_state,
@@ -9,6 +11,7 @@ from src.decision_engine import (
     _scenario_establishment_probability,
     make_decision,
 )
+from src.forecast import DailyForecast, WeatherForecast
 
 
 VALID_MATRIX = [
@@ -16,6 +19,41 @@ VALID_MATRIX = [
     [0.20, 0.60, 0.20],
     [0.10, 0.30, 0.60],
 ]
+
+
+def _make_transition_matrix():
+    return np.array([
+        [0.70, 0.20, 0.10],
+        [0.30, 0.50, 0.20],
+        [0.10, 0.30, 0.60],
+    ])
+
+
+def _make_decision_forecast(
+    start_date="2024-07-01",
+    num_days=20,
+    precipitation_probability=0.8,
+):
+    start = pd.Timestamp(start_date)
+
+    daily = tuple(
+        DailyForecast(
+            forecast_date=(
+                start + pd.Timedelta(days=day)
+            ).date(),
+            rainfall_mm=20.0,
+            precipitation_probability=(
+                precipitation_probability
+            ),
+        )
+        for day in range(num_days)
+    )
+
+    return WeatherForecast(
+        source="test-provider",
+        issued_at=datetime(2024, 6, 30),
+        daily=daily,
+    )
 
 
 def test_calculate_daily_et_returns_one_value_per_day():
@@ -632,4 +670,79 @@ def test_safe_wait_trajectories_rejects_short_scenario():
             crop_name="cotton",
             soil_type="medium_black",
             current_moisture_mm=30.0,
+        )
+
+def test_make_decision_rejects_forecast_without_start_date():
+    forecast = _make_decision_forecast()
+
+    with pytest.raises(ValueError, match="forecast requires start_date"):
+        make_decision(
+            crop_name="cotton",
+            soil_type="sandy_loam",
+            current_moisture_mm=20.0,
+            rainfall_yesterday_mm=10.0,
+            transition_matrix=_make_transition_matrix(),
+            num_simulations=10,
+            days_to_simulate=7,
+            forecast=forecast,
+            forecast_weight=0.5,
+        )
+
+
+def test_make_decision_rejects_forecast_with_transition_matrix():
+    forecast = _make_decision_forecast()
+
+    with pytest.raises(
+        ValueError,
+        match="forecast cannot be used with an explicit transition_matrix",
+    ):
+        make_decision(
+            crop_name="cotton",
+            soil_type="sandy_loam",
+            current_moisture_mm=20.0,
+            rainfall_yesterday_mm=10.0,
+            transition_matrix=_make_transition_matrix(),
+            num_simulations=10,
+            days_to_simulate=7,
+            start_date="2024-07-01",
+            forecast=forecast,
+            forecast_weight=0.5,
+        )
+
+
+def test_make_decision_requires_forecast_weight():
+    forecast = _make_decision_forecast()
+
+    with pytest.raises(
+        ValueError,
+        match="forecast_weight must be provided",
+    ):
+        make_decision(
+            crop_name="cotton",
+            soil_type="sandy_loam",
+            current_moisture_mm=20.0,
+            rainfall_yesterday_mm=10.0,
+            transition_matrix=None,
+            num_simulations=10,
+            days_to_simulate=7,
+            start_date="2024-07-01",
+            forecast=forecast,
+        )
+
+
+def test_make_decision_rejects_forecast_weight_without_forecast():
+    with pytest.raises(
+        ValueError,
+        match="forecast_weight cannot be provided without forecast",
+    ):
+        make_decision(
+            crop_name="cotton",
+            soil_type="sandy_loam",
+            current_moisture_mm=20.0,
+            rainfall_yesterday_mm=10.0,
+            transition_matrix=None,
+            num_simulations=10,
+            days_to_simulate=7,
+            start_date="2024-07-01",
+            forecast_weight=0.5,
         )

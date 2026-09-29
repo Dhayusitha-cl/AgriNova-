@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from api import DecisionRequest, app
+from datetime import datetime, timedelta
 
 import pytest
 import json
@@ -550,3 +551,108 @@ def test_decision_rejects_mixed_location_sources():
     )
 
     assert response.status_code == 422
+
+def valid_forecast_payload(num_days=20):
+    start = datetime.fromisoformat("2024-07-01T00:00:00")
+
+    return {
+        "source": "test-provider",
+        "issued_at": "2024-07-01T06:00:00Z",
+        "daily": [
+            {
+                "forecast_date": (
+                    start + timedelta(days=index)
+                ).date().isoformat(),
+                "rainfall_mm": 12.0,
+                "precipitation_probability": 0.8,
+            }
+            for index in range(num_days)
+        ],
+    }
+
+def test_decision_accepts_forecast(monkeypatch):
+    payload = valid_payload()
+
+    payload.pop("transition_matrix")
+    payload["start_date"] = "2024-07-01"
+    payload["forecast"] = valid_forecast_payload()
+    payload["forecast_weight"] = 0.5
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+
+def test_decision_rejects_forecast_without_weight():
+    payload = valid_payload()
+
+    payload.pop("transition_matrix")
+    payload["start_date"] = "2024-07-01"
+    payload["forecast"] = valid_forecast_payload()
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 400
+
+    detail = response.json()["detail"]
+
+    assert detail["code"] == "DECISION_VALIDATION_ERROR"
+    assert "forecast_weight" in detail["message"]
+
+def test_decision_rejects_forecast_weight_without_forecast():
+    payload = valid_payload()
+
+    payload["forecast_weight"] = 0.5
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 400
+
+    detail = response.json()["detail"]
+
+    assert detail["code"] == "DECISION_VALIDATION_ERROR"
+    assert "forecast_weight" in detail["message"]
+
+def test_decision_rejects_forecast_with_transition_matrix():
+    payload = valid_payload()
+
+    payload["start_date"] = "2024-07-01"
+    payload["forecast"] = valid_forecast_payload()
+    payload["forecast_weight"] = 0.5
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 400
+
+    detail = response.json()["detail"]
+
+    assert detail["code"] == "DECISION_VALIDATION_ERROR"
+    assert "transition_matrix" in detail["message"]
+
+@pytest.mark.parametrize("bad_weight", [-0.1, 1.1])
+def test_invalid_forecast_weight_returns_422(bad_weight):
+    payload = valid_payload()
+
+    payload["forecast_weight"] = bad_weight
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 422
+
+    detail = response.json()["detail"]
+
+    assert detail["code"] == "REQUEST_VALIDATION_ERROR"

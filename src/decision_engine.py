@@ -25,6 +25,7 @@ from .crop_establishment import evaluate_establishment
 from .economic_engine import compare_all_decisions
 from .rainfall_states import classify_rainfall
 
+from .forecast import WeatherForecast
 from .calibration_artifact import CalibrationArtifact
 
 def _validate_inputs(
@@ -435,6 +436,8 @@ def make_decision(
     rainfall_data=None,
     initial_state=None,
     calibration_artifact=None,
+    forecast=None,
+    forecast_weight=None,
 ):
     """
     Generate a probabilistic pre-sowing decision.
@@ -477,6 +480,33 @@ def make_decision(
                 "'dry', 'drizzle', 'rain'."
             )
 
+    if forecast is not None:
+        if not isinstance(forecast, WeatherForecast):
+            raise TypeError(
+                "forecast must be a WeatherForecast instance."
+            )
+
+        if start_date is None:
+            raise ValueError(
+                "forecast requires start_date."
+            )
+
+        if transition_matrix is not None:
+            raise ValueError(
+                "forecast cannot be used with an explicit "
+                "transition_matrix."
+            )
+
+        if forecast_weight is None:
+            raise ValueError(
+                "forecast_weight must be provided when "
+                "forecast is supplied."
+            )
+
+    elif forecast_weight is not None:
+        raise ValueError(
+            "forecast_weight cannot be provided without forecast."
+        )
     # =========================================================
     # INITIAL WEATHER STATE
     # =========================================================
@@ -517,6 +547,8 @@ def make_decision(
             random_seed=random_seed,
             rainfall_data=rainfall_data,
             calibration_artifact=calibration_artifact,
+            forecast=forecast,
+            forecast_weight=forecast_weight,
         )
     else:
         if transition_matrix is None:
@@ -571,6 +603,8 @@ def make_decision(
             random_seed=random_seed + 1,
             rainfall_data=rainfall_data,
             calibration_artifact=calibration_artifact,
+            forecast=forecast,
+            forecast_weight=forecast_weight,
         )
     else:
         wait_scenarios = generate_monte_carlo_scenarios(
