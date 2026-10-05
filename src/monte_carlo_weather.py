@@ -105,6 +105,13 @@ def generate_calibrated_monte_carlo_scenarios(
             )
         }
 
+        # The initial state is fixed on the simulation start date.
+        # Forecast evidence is consumed only for subsequent
+        # transition days.
+        required_dates.discard(
+            simulation_start.date()
+        )
+
         missing_dates = required_dates - forecast_dates
 
         if missing_dates:
