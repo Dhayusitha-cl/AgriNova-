@@ -39,10 +39,11 @@ class DecisionTrace(BaseModel):
     climate_source: str | None = None
     climate_grid_key: str | None = None
 
-    calibration_schema_version: str | None
-    calibration_artifact_type: str | None
-    calibration_artifact_id: str | None
-    start_date: date | None
+    calibration_schema_version: str | None = None
+    calibration_artifact_type: str | None = None
+    calibration_artifact_id: str | None = None
+    start_date: date | None = None
+
     random_seed: int
     num_simulations: int
     days_to_simulate: int

@@ -656,3 +656,48 @@ def test_invalid_forecast_weight_returns_422(bad_weight):
     detail = response.json()["detail"]
 
     assert detail["code"] == "REQUEST_VALIDATION_ERROR"
+
+def test_decision_trace_contract_with_explicit_transition_matrix():
+    response = client.post(
+        "/api/v1/decision",
+        json=valid_payload(),
+    )
+
+    assert response.status_code == 200
+
+    trace = response.json()["trace"]
+
+    assert trace["location_id"] == "yavatmal"
+    assert trace["latitude"] is None
+    assert trace["longitude"] is None
+    assert trace["climate_source"] is None
+    assert trace["climate_grid_key"] is None
+
+    assert trace["calibration_schema_version"] is None
+    assert trace["calibration_artifact_type"] is None
+    assert trace["calibration_artifact_id"] is None
+
+def test_decision_trace_contract_with_production_calibration():
+    payload = valid_payload()
+
+    payload.pop("transition_matrix")
+    payload["start_date"] = "2024-06-15"
+
+    response = client.post(
+        "/api/v1/decision",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+
+    trace = response.json()["trace"]
+
+    assert trace["location_id"] == "yavatmal"
+    assert trace["latitude"] is None
+    assert trace["longitude"] is None
+    assert trace["climate_source"] is None
+    assert trace["climate_grid_key"] is None
+
+    assert trace["calibration_schema_version"]
+    assert trace["calibration_artifact_type"] == "rainfall_calibration"
+    assert trace["calibration_artifact_id"]
