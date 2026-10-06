@@ -466,6 +466,20 @@ def decision(request: DecisionRequest):
             initial_rainfall_state=result["initial_rainfall_state"],
             crop_name=request.crop_name,
             soil_type=request.soil_type,
+            current_moisture_mm=request.current_moisture_mm,
+            rainfall_yesterday_mm=request.rainfall_yesterday_mm,
+            forecast_used=request.forecast is not None,
+            forecast_source=(
+                request.forecast.source
+                if request.forecast is not None
+                else None
+            ),
+            forecast_issued_at=(
+                request.forecast.issued_at
+                if request.forecast is not None
+                else None
+            ),
+            forecast_weight=request.forecast_weight,
         )
 
     except HTTPException:

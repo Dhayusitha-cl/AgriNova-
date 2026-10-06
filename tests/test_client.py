@@ -36,6 +36,13 @@ def test_client_assess_sowing_success():
     assert result.trace.calibration_artifact_id
     assert result.trace.calibration_artifact_type == "rainfall_calibration"
 
+    assert result.trace.current_moisture_mm == 35.0
+    assert result.trace.rainfall_yesterday_mm == 12.0
+    assert result.trace.forecast_used is False
+    assert result.trace.forecast_source is None
+    assert result.trace.forecast_issued_at is None
+    assert result.trace.forecast_weight is None
+
 
 def test_client_accepts_coordinate_location(monkeypatch):
     monkeypatch.setenv(
@@ -123,6 +130,12 @@ def test_client_accepts_forecast():
     result = client.assess_sowing(**kwargs)
 
     assert result.decision
+    assert result.trace.forecast_used is True
+    assert result.trace.forecast_source == "test-provider"
+    assert result.trace.forecast_issued_at == datetime.fromisoformat(
+        "2024-07-01T06:00:00+00:00"
+    )
+    assert result.trace.forecast_weight == 0.5
 
 def test_client_rejects_forecast_without_weight():
     kwargs = valid_client_kwargs()

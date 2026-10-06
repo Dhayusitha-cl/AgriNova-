@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel
 
@@ -50,6 +50,14 @@ class DecisionTrace(BaseModel):
     initial_rainfall_state: str
     crop_name: str
     soil_type: str
+
+    current_moisture_mm: float
+    rainfall_yesterday_mm: float
+
+    forecast_used: bool = False
+    forecast_source: str | None = None
+    forecast_issued_at: datetime | None = None
+    forecast_weight: float | None = None
 
 
 class DecisionResult(BaseModel):

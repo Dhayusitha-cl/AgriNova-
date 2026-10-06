@@ -245,6 +245,13 @@ def test_decision_success_with_coordinate_calibration(monkeypatch):
     assert trace["calibration_artifact_id"] == (
         "7211729434149487a1913e1bfc2ebe77d66b93fa7fdbefb13dc0a74dec63ac4d"
     )
+    assert trace["forecast_used"] is False
+    assert trace["forecast_source"] is None
+    assert trace["forecast_issued_at"] is None
+    assert trace["forecast_weight"] is None
+
+    assert trace["current_moisture_mm"] == 35.0
+    assert trace["rainfall_yesterday_mm"] == 12.0
 
 
 def test_decision_rejects_unknown_location():
@@ -584,6 +591,15 @@ def test_decision_accepts_forecast(monkeypatch):
     )
 
     assert response.status_code == 200
+    trace = response.json()["trace"]
+
+    assert trace["forecast_used"] is True
+    assert trace["forecast_source"] == "test-provider"
+    assert trace["forecast_issued_at"] == "2024-07-01T06:00:00Z"
+    assert trace["forecast_weight"] == 0.5
+
+    assert trace["current_moisture_mm"] == 35.0
+    assert trace["rainfall_yesterday_mm"] == 12.0
 
 def test_decision_rejects_forecast_without_weight():
     payload = valid_payload()
