@@ -302,14 +302,36 @@ def test_all_output_probabilities_are_finite_and_bounded():
         assert math.isfinite(probability)
         assert 0.0 <= probability <= 1.0
 
-def test_zero_historical_wet_probability_is_rejected():
-    with pytest.raises(ValueError):
+
+def test_zero_wet_probability_with_zero_weight_returns_historical():
+    historical = {
+        "dry": 1.0,
+        "drizzle": 0.0,
+        "rain": 0.0,
+    }
+
+    result = condition_rainfall_state_probabilities(
+        historical,
+        forecast_probability=0.80,
+        forecast_weight=0.0,
+    )
+
+    assert result == historical
+
+
+def test_zero_wet_probability_with_positive_weight_raises():
+    historical = {
+        "dry": 1.0,
+        "drizzle": 0.0,
+        "rain": 0.0,
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="Historical wet-day probability",
+    ):
         condition_rainfall_state_probabilities(
-            {
-                "dry": 1.0,
-                "drizzle": 0.0,
-                "rain": 0.0,
-            },
+            historical,
             forecast_probability=0.80,
             forecast_weight=0.50,
         )

@@ -12,6 +12,10 @@ Flow:
 Simulation probabilities are estimates, not guarantees.
 """
 
+import math
+import re
+from datetime import date, datetime
+
 import numpy as np
 
 from .crop_data import crops
@@ -423,6 +427,144 @@ def _safe_wait_trajectories(
     )
 
 
+def _calculate_decision_separation(all_decisions):
+    """
+    Calculate the absolute expected-profit gap between
+    the best and second-best available decisions.
+
+    This is an economic separation indicator, not a
+    statistical confidence measure.
+    """
+
+    if not all_decisions:
+        return 0.0
+
+    profits = [
+        float(item["expected_profit"])
+        for item in all_decisions
+    ]
+
+    if not all(math.isfinite(profit) for profit in profits):
+        raise ValueError(
+            "Decision expected profits must be finite."
+        )
+
+    ordered = sorted(profits, reverse=True)
+
+    if len(ordered) < 2:
+        return 0.0
+
+    return float(ordered[0] - ordered[1])
+
+
+
+def _assess_crop_eligibility(crop_name, start_date=None):
+    """
+    Assess provisional alternative-crop eligibility.
+
+    The configured sowing window is only a timing filter. It does not
+    establish regional, soil, variety, or market suitability.
+    """
+    if crop_name not in crops:
+        raise ValueError(f"Unknown crop: {crop_name}")
+
+    if start_date is None:
+        return {
+            "eligible": True,
+            "status": "timing_unassessed",
+            "reason": (
+                "No start_date supplied; sowing-window eligibility "
+                "could not be assessed."
+            ),
+        }
+
+    if isinstance(start_date, datetime):
+        assessment_date = start_date.date()
+    elif isinstance(start_date, date):
+        assessment_date = start_date
+    else:
+        try:
+            assessment_date = date.fromisoformat(str(start_date))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "start_date must be a date, datetime, or ISO date string."
+            ) from exc
+
+    window = crops[crop_name].get("optimal_sowing_window")
+    if not isinstance(window, str):
+        return {
+            "eligible": False,
+            "status": "missing_window",
+            "reason": "No configured sowing window is available.",
+        }
+
+    match = re.fullmatch(
+        r"\s*([A-Za-z]+)\s+(\d{1,2})\s*-\s*"
+        r"([A-Za-z]+)\s+(\d{1,2})\s*",
+        window,
+    )
+    if not match:
+        return {
+            "eligible": False,
+            "status": "invalid_window",
+            "reason": f"Cannot interpret configured window: {window!r}.",
+        }
+
+    start_month, start_day, end_month, end_day = match.groups()
+
+    try:
+        start_md = (
+            datetime.strptime(start_month, "%B").month,
+            int(start_day),
+        )
+        end_md = (
+            datetime.strptime(end_month, "%B").month,
+            int(end_day),
+        )
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid sowing window configured for {crop_name}: {window!r}"
+        ) from exc
+
+    try:
+        date(2000, *start_md)
+        date(2000, *end_md)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid sowing window configured for {crop_name}: {window!r}"
+        ) from exc
+
+    current_md = (assessment_date.month, assessment_date.day)
+
+    if start_md <= end_md:
+        within_window = start_md <= current_md <= end_md
+    else:
+        # Handles sowing windows crossing December–January.
+        within_window = (
+            current_md >= start_md
+            or current_md <= end_md
+        )
+
+    if within_window:
+        return {
+            "eligible": True,
+            "status": "within_configured_window",
+            "reason": (
+                "Assessment date falls within the configured sowing window; "
+                "regional and soil suitability remain unverified."
+            ),
+        }
+
+    return {
+        "eligible": False,
+        "status": "outside_configured_window",
+        "reason": (
+            f"Assessment date {assessment_date.isoformat()} is outside "
+            f"the configured sowing window ({window})."
+        ),
+    }
+
+
 def make_decision(
     crop_name,
     soil_type,
@@ -532,7 +674,12 @@ def make_decision(
         days_to_simulate,
         crop_germination_days,
         soybean_germination_days,
+        *(
+            int(data["germination_days"])
+            for data in crops.values()
+        ),
     )
+
 
     # =========================================================
     # SOW TODAY
@@ -627,19 +774,53 @@ def make_decision(
     )
 
     # =========================================================
-    # SWITCH TO SOYBEAN
+    # LEGACY SOYBEAN PROBABILITY + ALTERNATIVE CROP EVALUATION
     # =========================================================
 
-    soybean_scenarios = sow_scenarios
-
+    # Preserve the existing soybean probability field for API/SDK
+    # compatibility, even when soybean is not an eligible alternative.
     germ_prob_soybean, soybean_trajectories = (
         _scenario_establishment_probability(
-            scenarios=soybean_scenarios,
+            scenarios=sow_scenarios,
             crop_name="soybean",
             soil_type=soil_type,
             initial_moisture_mm=current_moisture_mm,
         )
     )
+
+    crop_eligibility = {}
+    alternative_probabilities = {}
+    alternative_trajectories = {}
+
+    for candidate in crops:
+        if candidate == crop_name:
+            crop_eligibility[candidate] = {
+                "eligible": False,
+                "status": "primary_crop",
+                "reason": "This is already the selected primary crop.",
+            }
+            continue
+
+        eligibility = _assess_crop_eligibility(
+            candidate,
+            start_date=start_date,
+        )
+        crop_eligibility[candidate] = eligibility
+
+        if not eligibility["eligible"]:
+            continue
+
+        probability, trajectories_for_crop = (
+            _scenario_establishment_probability(
+                scenarios=sow_scenarios,
+                crop_name=candidate,
+                soil_type=soil_type,
+                initial_moisture_mm=current_moisture_mm,
+            )
+        )
+
+        alternative_probabilities[candidate] = float(probability)
+        alternative_trajectories[candidate] = trajectories_for_crop
 
     # =========================================================
     # ECONOMIC COMPARISON
@@ -653,6 +834,11 @@ def make_decision(
         germ_prob_soybean=germ_prob_soybean,
         rainfall_yesterday_mm=rainfall_yesterday_mm,
         current_moisture_mm=current_moisture_mm,
+        switch_probabilities=alternative_probabilities,
+    )
+
+    decision_separation = _calculate_decision_separation(
+        economic_comparison["all_decisions"]
     )
 
     economic_decision = economic_comparison.get(
@@ -666,8 +852,9 @@ def make_decision(
     elif economic_decision == "Wait 5 Days":
         decision = "WAIT 5 DAYS"
 
-    elif economic_decision == "Switch to Soybean":
-        decision = "SWITCH TO SOYBEAN"
+    elif economic_decision.startswith("Switch to "):
+        switched_crop = economic_decision[len("Switch to "):].upper()
+        decision = f"SWITCH TO {switched_crop}"
 
     else:
         decision = "WAIT 5 DAYS"
@@ -741,6 +928,14 @@ def make_decision(
 
         "soybean_trajectories": soybean_trajectories,
 
+        "alternative_probabilities": alternative_probabilities,
+
+        "alternative_trajectories": alternative_trajectories,
+
+        "crop_eligibility": crop_eligibility,
+
+        "decision_separation": float(decision_separation),
+
         "current_moisture": float(
             current_moisture_mm
         ),
@@ -774,6 +969,12 @@ def make_decision(
                 "Probability separation between the "
                 "best and second-best option; not a "
                 "statistical confidence interval."
+            ),
+
+            "decision_separation_definition": (
+                "Absolute expected-profit difference between the "
+                "best and second-best evaluated decisions, per acre. "
+                "Not a probability or statistical confidence measure."
             ),
 
             "simulation_note": (

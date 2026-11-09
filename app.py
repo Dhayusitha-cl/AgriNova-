@@ -1,4 +1,5 @@
 import streamlit as st
+from datetime import date
 import requests
 import pandas as pd
 import ee
@@ -238,22 +239,23 @@ def get_earth_engine_demo_data():
 
 def get_api_decision():
 
+
     payload = {
+        # Use the coordinates of the selected district.
+        "latitude": latitude,
+        "longitude": longitude,
+        "start_date": date.today().isoformat(),
+
         "crop_name": crop,
         "soil_type": soil_type,
         "current_moisture_mm": soil_moisture,
         "rainfall_yesterday_mm": rainfall,
 
-        # Default transition matrix used by the backend.
-        "transition_matrix": [
-            [0.6, 0.3, 0.1],
-            [0.2, 0.6, 0.2],
-            [0.1, 0.3, 0.6],
-        ],
-
+        # Let the API resolve location-specific calibration.
         "num_simulations": 1000,
         "days_to_simulate": 5,
     }
+
 
     try:
 

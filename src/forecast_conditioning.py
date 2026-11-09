@@ -150,6 +150,11 @@ def condition_rainfall_state_probabilities(
         + probabilities["rain"]
     )
 
+    # A zero forecast weight means historical probabilities
+    # must remain unchanged, including an all-dry distribution.
+    if forecast_weight == 0.0:
+        return probabilities.copy()
+
     conditioned_wet_probability = (
         (1.0 - forecast_weight)
         * historical_wet_probability

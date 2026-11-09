@@ -279,6 +279,7 @@ def test_decision_requires_location_for_production_calibration():
 
     assert response.status_code == 422
 
+
 def test_decision_economic_comparison_contract():
     response = client.post("/api/v1/decision", json=valid_payload())
 
@@ -290,25 +291,48 @@ def test_decision_economic_comparison_contract():
         "sow_today",
         "wait",
         "switch",
+        "switch_options",
         "best_decision",
         "best_profit",
         "all_decisions",
     }
 
-    for key in ("sow_today", "wait", "switch"):
+    outcome_keys = {
+        "decision",
+        "expected_profit",
+        "success_probability",
+        "best_case_profit",
+        "worst_case_profit",
+        "risk_level",
+        "advantage_over_others",
+    }
+
+    for key in ("sow_today", "wait"):
         outcome = economic[key]
-
-        assert set(outcome) == {
-            "decision",
-            "expected_profit",
-            "success_probability",
-            "best_case_profit",
-            "worst_case_profit",
-            "risk_level",
-            "advantage_over_others",
-        }
-
+        assert set(outcome) == outcome_keys
         assert 0.0 <= outcome["success_probability"] <= 1.0
+
+    switch_options = economic["switch_options"]
+    assert isinstance(switch_options, dict)
+
+    for crop_name, outcome in switch_options.items():
+        assert crop_name in {"cotton", "soybean", "sorghum", "paddy"}
+        assert set(outcome) == outcome_keys
+        assert outcome["decision"].startswith("Switch to ")
+        assert 0.0 <= outcome["success_probability"] <= 1.0
+
+    if switch_options:
+        assert economic["switch"] is not None
+        assert economic["switch"]["decision"] in {
+            outcome["decision"] for outcome in switch_options.values()
+        }
+    else:
+        assert economic["switch"] is None
+
+    assert isinstance(economic["all_decisions"], list)
+    assert economic["best_decision"] in {
+        outcome["decision"] for outcome in economic["all_decisions"]
+    }
 
 
 def test_decision_assumptions_contract():
@@ -324,6 +348,7 @@ def test_decision_assumptions_contract():
         "economic_decision_policy",
         "confidence_definition",
         "simulation_note",
+        "decision_separation_definition",
     }
 
     assert assumptions["daily_et_mm"] > 0

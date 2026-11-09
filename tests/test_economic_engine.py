@@ -8,6 +8,18 @@ from src.economic_engine import (
     format_currency,
 )
 
+def test_switch_probability_rejects_boolean():
+    with pytest.raises(ValueError):
+        compare_all_decisions(
+            crop_name="cotton",
+            soil_type="sandy_loam",
+            germ_prob_today=0.5,
+            germ_prob_wait=0.5,
+            switch_probabilities={
+                "soybean": True
+            },
+        )
+
 
 def test_calculate_profit_rejects_nan_probability():
     with pytest.raises(
@@ -499,3 +511,163 @@ def test_expected_profit_matches_probability_weighted_outcomes():
     )
 
     assert result["expected_profit"] == expected_profit
+
+
+def test_multi_crop_switch_returns_all_candidate_options():
+    result = compare_all_decisions(
+        crop_name="cotton",
+        soil_type="medium_black",
+        germ_prob_today=0.40,
+        germ_prob_wait=0.30,
+        switch_probabilities={
+            "soybean": 0.60,
+            "sorghum": 0.70,
+            "paddy": 0.50,
+        },
+    )
+
+    assert set(result["switch_options"]) == {
+        "soybean",
+        "sorghum",
+        "paddy",
+    }
+
+
+def test_multi_crop_switch_preserves_candidate_probabilities():
+    probabilities = {
+        "soybean": 0.40,
+        "sorghum": 0.75,
+        "paddy": 0.55,
+    }
+
+    result = compare_all_decisions(
+        crop_name="cotton",
+        soil_type="medium_black",
+        germ_prob_today=0.50,
+        germ_prob_wait=0.45,
+        switch_probabilities=probabilities,
+    )
+
+    for crop_name, probability in probabilities.items():
+        assert (
+            result["switch_options"][crop_name]["success_probability"]
+            == probability
+        )
+
+
+def test_non_soybean_candidate_can_win():
+    result = compare_all_decisions(
+        crop_name="cotton",
+        soil_type="medium_black",
+        germ_prob_today=0.0,
+        germ_prob_wait=0.0,
+        switch_probabilities={
+            "soybean": 0.0,
+            "sorghum": 1.0,
+        },
+    )
+
+    assert result["best_decision"] == "Switch to Sorghum"
+
+
+def test_primary_crop_is_excluded_from_switch_options():
+    result = compare_all_decisions(
+        crop_name="cotton",
+        soil_type="medium_black",
+        germ_prob_today=0.60,
+        germ_prob_wait=0.50,
+        switch_probabilities={
+            "cotton": 0.99,
+            "soybean": 0.40,
+        },
+    )
+
+    assert "cotton" not in result["switch_options"]
+    assert "soybean" in result["switch_options"]
+
+
+def test_empty_switch_options_preserve_sow_and_wait():
+    result = compare_all_decisions(
+        crop_name="cotton",
+        soil_type="medium_black",
+        germ_prob_today=0.70,
+        germ_prob_wait=0.60,
+        switch_probabilities={},
+    )
+
+    assert result["switch_options"] == {}
+    assert result["switch"] is None
+    assert len(result["all_decisions"]) == 2
+    assert result["best_decision"] in {
+        "Sow Today",
+        "Wait 5 Days",
+    }
+
+
+def test_multi_crop_switch_rejects_invalid_probabilities():
+    invalid_probabilities = [
+        float("nan"),
+        float("inf"),
+        -0.1,
+        1.1,
+    ]
+
+    for probability in invalid_probabilities:
+        with pytest.raises(ValueError):
+            compare_all_decisions(
+                crop_name="cotton",
+                soil_type="medium_black",
+                germ_prob_today=0.50,
+                germ_prob_wait=0.40,
+                switch_probabilities={
+                    "sorghum": probability,
+                },
+            )
+
+
+def test_multi_crop_switch_legacy_alias_prefers_soybean():
+    result = compare_all_decisions(
+        crop_name="cotton",
+        soil_type="medium_black",
+        germ_prob_today=0.0,
+        germ_prob_wait=0.0,
+        switch_probabilities={
+            "soybean": 0.40,
+            "sorghum": 1.0,
+        },
+    )
+
+    assert result["best_decision"] == "Switch to Sorghum"
+    assert result["switch"] is result["switch_options"]["soybean"]
+
+
+def test_multi_crop_switch_legacy_alias_uses_best_candidate_without_soybean():
+    result = compare_all_decisions(
+        crop_name="cotton",
+        soil_type="medium_black",
+        germ_prob_today=0.0,
+        germ_prob_wait=0.0,
+        switch_probabilities={
+            "sorghum": 1.0,
+        },
+    )
+
+    assert result["switch"] is result["switch_options"]["sorghum"]
+
+
+def test_legacy_mode_excludes_primary_soybean_from_switch():
+    result = compare_all_decisions(
+        crop_name="soybean",
+        soil_type="medium_black",
+        germ_prob_today=0.60,
+        germ_prob_wait=0.50,
+        germ_prob_soybean=0.80,
+    )
+
+    assert result["switch_options"] == {}
+    assert result["switch"] is None
+    assert len(result["all_decisions"]) == 2
+    assert result["best_decision"] in {
+        "Sow Today",
+        "Wait 5 Days",
+    }

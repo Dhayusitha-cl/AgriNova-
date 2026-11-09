@@ -404,6 +404,7 @@ def test_sdk_probability_fields_are_bounded():
         assert 0.0 <= probability <= 1.0
 
 
+
 def test_sdk_economic_comparison_is_typed():
     result = CropLogicClient().assess_sowing(
         location_id="yavatmal",
@@ -416,9 +417,21 @@ def test_sdk_economic_comparison_is_typed():
         days_to_simulate=7,
     )
 
-    assert result.economic_comparison.sow_today.decision == "Sow Today"
-    assert result.economic_comparison.wait.decision == "Wait 5 Days"
-    assert result.economic_comparison.switch.decision == "Switch to Soybean"
+    comparison = result.economic_comparison
+
+    assert comparison.sow_today.decision == "Sow Today"
+    assert comparison.wait.decision == "Wait 5 Days"
+
+    # Soybean is outside its configured sowing window on June 15.
+    assert "soybean" not in comparison.switch_options
+    assert set(comparison.switch_options).issubset({"sorghum", "paddy"})
+    assert comparison.switch is not None
+    assert comparison.switch.decision in {
+        outcome.decision
+        for outcome in comparison.switch_options.values()
+    }
+    assert comparison.best_decision == "Sow Today"
+
 
 
 def test_sdk_rejects_unknown_location():

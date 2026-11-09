@@ -210,6 +210,7 @@ class DecisionResponse(BaseModel):
     soil_moisture_today: MoistureSummary
     soil_moisture_wait: MoistureSummary
     trace: DecisionTrace
+    decision_separation: float
 
 # ---------------------------------------------------------
 # API 1 — HEALTH CHECK
@@ -528,6 +529,7 @@ def decision(request: DecisionRequest):
         "days_to_simulate": result["days_to_simulate"],
         "assumptions": result["assumptions"],
         "trace": trace,
+        "decision_separation": result["decision_separation"],
 
         "soil_moisture_today": {
             "mean": trajectories.mean(axis=0).tolist(),

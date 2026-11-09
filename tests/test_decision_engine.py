@@ -3,15 +3,18 @@ import pandas as pd
 import pytest
 
 from datetime import datetime
+from datetime import date
 from src.decision_engine import (
     calculate_daily_et,
     _get_initial_state,
     _calculate_confidence,
+    _calculate_decision_separation,
     _safe_wait_trajectories,
     _scenario_establishment_probability,
     make_decision,
 )
 from src.forecast import DailyForecast, WeatherForecast
+from src.decision_engine import _assess_crop_eligibility
 
 
 VALID_MATRIX = [
@@ -746,3 +749,118 @@ def test_make_decision_rejects_forecast_weight_without_forecast():
             start_date="2024-07-01",
             forecast_weight=0.5,
         )
+
+def test_crop_eligibility_within_configured_window():
+    result = _assess_crop_eligibility(
+        "soybean",
+        start_date="2024-07-01",
+    )
+
+    assert result["eligible"] is True
+    assert result["status"] == "within_configured_window"
+
+
+def test_crop_eligibility_outside_configured_window():
+    result = _assess_crop_eligibility(
+        "soybean",
+        start_date="2024-08-01",
+    )
+
+    assert result["eligible"] is False
+    assert result["status"] == "outside_configured_window"
+
+
+def test_crop_eligibility_without_date_is_unassessed():
+    result = _assess_crop_eligibility("soybean")
+
+    assert result["eligible"] is True
+    assert result["status"] == "timing_unassessed"
+    assert "could not be assessed" in result["reason"]
+
+
+def test_crop_eligibility_rejects_invalid_date():
+    with pytest.raises(ValueError, match="start_date"):
+        _assess_crop_eligibility(
+            "soybean",
+            start_date="not-a-date",
+        )
+
+
+def test_crop_eligibility_supports_year_crossing_window(monkeypatch):
+    from src import decision_engine
+
+    monkeypatch.setitem(
+        decision_engine.crops["soybean"],
+        "optimal_sowing_window",
+        "November 15 - January 15",
+    )
+
+    for assessment_date in ("2024-11-20", "2025-01-10"):
+        result = _assess_crop_eligibility(
+            "soybean",
+            start_date=assessment_date,
+        )
+        assert result["eligible"] is True
+
+    result = _assess_crop_eligibility(
+        "soybean",
+        start_date="2025-02-01",
+    )
+    assert result["eligible"] is False
+
+
+def test_crop_eligibility_rejects_date_with_trailing_content():
+    with pytest.raises(ValueError, match="start_date"):
+        _assess_crop_eligibility(
+            "soybean",
+            start_date="2024-07-01-invalid",
+        )
+
+
+def test_crop_eligibility_accepts_date_object():
+    result = _assess_crop_eligibility(
+        "soybean",
+        start_date=date(2024, 7, 1),
+    )
+
+    assert result["eligible"] is True
+
+
+def test_decision_separation_uses_top_two_profits():
+    decisions = [
+        {"expected_profit": 1000.0},
+        {"expected_profit": 700.0},
+        {"expected_profit": 200.0},
+    ]
+
+    assert _calculate_decision_separation(decisions) == 300.0
+
+
+def test_decision_separation_handles_tie():
+    decisions = [
+        {"expected_profit": 500.0},
+        {"expected_profit": 500.0},
+    ]
+
+    assert _calculate_decision_separation(decisions) == 0.0
+
+
+def test_decision_separation_handles_negative_profits():
+    decisions = [
+        {"expected_profit": -100.0},
+        {"expected_profit": -300.0},
+    ]
+
+    assert _calculate_decision_separation(decisions) == 200.0
+
+
+def test_decision_separation_with_one_option():
+    decisions = [
+        {"expected_profit": 500.0},
+    ]
+
+    assert _calculate_decision_separation(decisions) == 0.0
+
+
+def test_decision_separation_with_no_options():
+    assert _calculate_decision_separation([]) == 0.0

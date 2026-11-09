@@ -1,6 +1,7 @@
 from datetime import date, datetime
 
 from pydantic import BaseModel
+from pydantic import Field
 
 
 class EconomicOutcome(BaseModel):
@@ -13,13 +14,16 @@ class EconomicOutcome(BaseModel):
     advantage_over_others: float
 
 
+
 class EconomicComparison(BaseModel):
     sow_today: EconomicOutcome
     wait: EconomicOutcome
-    switch: EconomicOutcome
+    switch: EconomicOutcome | None
+    switch_options: dict[str, EconomicOutcome] = Field(default_factory=dict)
     best_decision: str
     best_profit: float
     all_decisions: list[EconomicOutcome]
+
 
 
 class Assumptions(BaseModel):
@@ -28,6 +32,7 @@ class Assumptions(BaseModel):
     economic_decision_policy: str
     confidence_definition: str
     simulation_note: str
+    decision_separation_definition: str
 
 
 class DecisionTrace(BaseModel):
@@ -74,3 +79,4 @@ class DecisionResult(BaseModel):
     days_to_simulate: int
     trace: DecisionTrace
     assumptions: Assumptions
+    decision_separation: float

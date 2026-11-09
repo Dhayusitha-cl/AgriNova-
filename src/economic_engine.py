@@ -358,49 +358,34 @@ def _calculate_wait(
 
 
 # ---------------------------------------------------------------------
-# SWITCH TO SOYBEAN
+# SWITCH TO ALTERNATIVE CROP
 # ---------------------------------------------------------------------
 
-def _calculate_switch(
-    germination_prob,
-):
+def _calculate_switch(crop_name, germination_prob):
     """
-    Calculate expected outcome when switching to soybean.
+    Calculate expected economic outcome for an alternative crop.
 
-    The supplied germination probability is interpreted as the
-    estimated establishment probability for soybean.
-
-    The economic engine uses the soybean establishment probability
-    from the physical simulation to calculate expected profit.
-
-    Economic assumptions are model assumptions, not guarantees.
+    The supplied probability comes from the physical simulation.
+    Each candidate uses its own crop parameters.
     """
 
-    soybean = crops["soybean"]
+    crop = crops[crop_name]
 
-    soybean_expected_profit = calculate_profit(
-        crop_name="soybean",
-        yield_per_acre=soybean[
-            "average_yield_per_acre"
-        ],
-        price_per_quintal=soybean[
-            "market_price_per_quintal"
-        ],
-        seed_cost=soybean[
-            "seed_cost_per_acre"
-        ],
+    expected_profit = calculate_profit(
+        crop_name=crop_name,
+        yield_per_acre=crop["average_yield_per_acre"],
+        price_per_quintal=crop["market_price_per_quintal"],
+        seed_cost=crop["seed_cost_per_acre"],
         success_probability=germination_prob,
     )
 
-    soybean_best_case_profit = (
-        soybean["average_yield_per_acre"]
-        * soybean["market_price_per_quintal"]
-        - soybean["seed_cost_per_acre"]
+    best_case_profit = (
+        crop["average_yield_per_acre"]
+        * crop["market_price_per_quintal"]
+        - crop["seed_cost_per_acre"]
     )
 
-    soybean_worst_case_profit = (
-        -soybean["seed_cost_per_acre"]
-    )
+    worst_case_profit = -crop["seed_cost_per_acre"]
 
     if germination_prob > 0.70:
         risk_level = "Low"
@@ -410,19 +395,11 @@ def _calculate_switch(
         risk_level = "High"
 
     return {
-        "decision": "Switch to Soybean",
-        "expected_profit": float(
-            soybean_expected_profit
-        ),
-        "success_probability": float(
-            germination_prob
-        ),
-        "best_case_profit": float(
-            soybean_best_case_profit
-        ),
-        "worst_case_profit": float(
-            soybean_worst_case_profit
-        ),
+        "decision": f"Switch to {crop_name.title()}",
+        "expected_profit": float(expected_profit),
+        "success_probability": float(germination_prob),
+        "best_case_profit": float(best_case_profit),
+        "worst_case_profit": float(worst_case_profit),
         "risk_level": risk_level,
     }
 
@@ -500,7 +477,11 @@ def calculate_economic_outcome(
         )
 
     if decision == "switch":
+        # Legacy compatibility:
+        # Historically, the single-decision switch path
+        # represents switching to soybean.
         return _calculate_switch(
+            crop_name="soybean",
             germination_prob=germination_prob,
         )
 
@@ -523,31 +504,23 @@ def compare_all_decisions(
     soil_type,
     germ_prob_today,
     germ_prob_wait,
-    germ_prob_soybean,
-    rainfall_yesterday_mm,
-    current_moisture_mm,
+    germ_prob_soybean=None,
+    rainfall_yesterday_mm=0.0,
+    current_moisture_mm=0.0,
+    *,
+    switch_probabilities=None,
 ):
     """
-    Compare SOW TODAY, WAIT and SWITCH economically.
+    Compare sowing today, waiting five days, and eligible
+    alternative crops.
 
-    The three establishment probabilities must come from the
-    physical simulation:
+    switch_probabilities:
+        Mapping of alternative crop names to their establishment
+        probabilities from the physical simulation.
 
-        germ_prob_today
-        germ_prob_wait
-        germ_prob_soybean
-
-    Returns
-    -------
-    dict
-        Contains:
-
-        - sow_today
-        - wait
-        - switch
-        - best_decision
-        - best_profit
-        - all_decisions
+    Legacy compatibility:
+        germ_prob_soybean is accepted when switch_probabilities
+        is not supplied.
     """
 
     sow_today = calculate_economic_outcome(
@@ -568,28 +541,69 @@ def compare_all_decisions(
         current_moisture_mm=current_moisture_mm,
     )
 
-    switch = calculate_economic_outcome(
-        crop_name=crop_name,
-        soil_type=soil_type,
-        decision="switch",
-        germination_prob=germ_prob_soybean,
-        rainfall_yesterday_mm=rainfall_yesterday_mm,
-        current_moisture_mm=current_moisture_mm,
-    )
+    # Preserve the old soybean-only interface.
+    if switch_probabilities is None:
+        candidate_probabilities = {}
+
+        if germ_prob_soybean is not None:
+            candidate_probabilities["soybean"] = germ_prob_soybean
+    else:
+        if not isinstance(switch_probabilities, dict):
+            raise ValueError(
+                "switch_probabilities must be a dictionary."
+            )
+
+        candidate_probabilities = dict(switch_probabilities)
+
+    # The primary crop cannot also be a switch candidate.
+    candidate_probabilities.pop(crop_name, None)
+
+    switch_options = {}
+
+    for candidate, probability in candidate_probabilities.items():
+
+        if candidate not in crops:
+            raise ValueError(
+                f"Unknown switch crop: {candidate}"
+            )
+
+        if (
+            isinstance(probability, bool)
+            or not isinstance(probability, (int, float))
+            or not math.isfinite(probability)
+            or not 0 <= probability <= 1
+        ):
+            raise ValueError(
+                f"Invalid establishment probability for {candidate}."
+            )
+
+        switch_options[candidate] = _calculate_switch(
+            crop_name=candidate,
+            germination_prob=probability,
+        )
+
+    # Legacy alias: soybean first, otherwise the best alternative.
+    if "soybean" in switch_options:
+        switch = switch_options["soybean"]
+    elif switch_options:
+        switch = max(
+            switch_options.values(),
+            key=lambda result: result["expected_profit"],
+        )
+    else:
+        switch = None
 
     decisions = [
         sow_today,
         wait,
-        switch,
+        *switch_options.values(),
     ]
 
-    # Select the option with the highest expected economic value.
     best_decision = max(
         decisions,
         key=lambda result: result["expected_profit"],
     )
 
-    # Calculate advantage relative to the strongest alternative.
     for decision_result in decisions:
 
         other_profits = [
@@ -607,13 +621,13 @@ def compare_all_decisions(
         "sow_today": sow_today,
         "wait": wait,
         "switch": switch,
+        "switch_options": switch_options,
         "best_decision": best_decision["decision"],
         "best_profit": float(
             best_decision["expected_profit"]
         ),
         "all_decisions": decisions,
     }
-
 
 # ---------------------------------------------------------------------
 # Currency formatting
