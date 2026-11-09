@@ -105,12 +105,10 @@ def generate_calibrated_monte_carlo_scenarios(
             )
         }
 
-        # The initial state is fixed on the simulation start date.
-        # Forecast evidence is consumed only for subsequent
-        # transition days.
-        required_dates.discard(
-            simulation_start.date()
-        )
+        # The first simulated day is transitioned from the previous
+        # observed state. Forecast conditioning is optional on this
+        # date because forecasts may begin on the following day.
+        required_dates.discard(simulation_start.date())
 
         missing_dates = required_dates - forecast_dates
 
@@ -230,43 +228,38 @@ def generate_calibrated_monte_carlo_scenarios(
                 current_state
             )
 
-            if day == 0:
-                simulated_state = current_state
+            state_probabilities = {
+                "dry": float(matrix[current_index][0]),
+                "drizzle": float(matrix[current_index][1]),
+                "rain": float(matrix[current_index][2]),
+            }
 
-            else:
-                state_probabilities = {
-                    "dry": float(matrix[current_index][0]),
-                    "drizzle": float(matrix[current_index][1]),
-                    "rain": float(matrix[current_index][2]),
-                }
+            forecast_entry = forecast_by_date.get(
+                simulation_date.date()
+            )
 
-                forecast_entry = forecast_by_date.get(
-                    simulation_date.date()
-                )
-
-                if forecast_entry is not None:
-                    state_probabilities = (
-                        condition_rainfall_state_probabilities(
-                            historical_probabilities=state_probabilities,
-                            forecast_probability=(
-                                forecast_entry
-                                .precipitation_probability
-                            ),
-                            forecast_weight=forecast_weight,
-                        )
+            if forecast_entry is not None:
+                state_probabilities = (
+                    condition_rainfall_state_probabilities(
+                        historical_probabilities=state_probabilities,
+                        forecast_probability=(
+                            forecast_entry.precipitation_probability
+                        ),
+                        forecast_weight=forecast_weight,
                     )
-
-                next_probabilities = [
-                    state_probabilities[state]
-                    for state in states
-                ]
-
-                next_index = rng.choice(
-                    len(states),
-                    p=next_probabilities,
                 )
 
-                simulated_state = states[next_index]
+            next_probabilities = [
+                state_probabilities[state]
+                for state in states
+            ]
+
+            next_index = rng.choice(
+                len(states),
+                p=next_probabilities,
+            )
+
+            simulated_state = states[next_index]
 
             if simulated_state == "dry":
                 rainfall = 0.0

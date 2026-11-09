@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.weather_simulator import generate_markov_states
 from src.forecast import DailyForecast, WeatherForecast
 from src.monte_carlo_weather import (
     generate_calibrated_monte_carlo_scenarios,
@@ -261,14 +262,41 @@ def test_calibrated_monte_carlo_forecast_is_reproducible():
     assert scenarios_1 == scenarios_2
 
 
-def test_calibrated_monte_carlo_forecast_does_not_change_day_zero():
+def test_calibrated_monte_carlo_applies_forecast_to_day_zero(
+    monkeypatch,
+):
+    import src.markov_calibration as calibration
+
     rainfall_data = _make_rainfall_data()
-    forecast = _make_forecast()
+    forecast = _make_forecast(
+        precipitation_probability=1.0,
+    )
+
+    # Rows and columns are ordered: dry, drizzle, rain.
+    #
+    # Previous state = drizzle:
+    # Historical transition = 50% dry, 50% rain.
+    # Forecast probability = 100% precipitation.
+    # With forecast weight 1.0, the conditioned result is rain.
+    deterministic_matrix = [
+        [1.0, 0.0, 0.0],
+        [0.5, 0.0, 0.5],
+        [0.0, 0.0, 1.0],
+    ]
+
+    def fake_monthly_matrix(*args, **kwargs):
+        return deterministic_matrix
+
+    monkeypatch.setattr(
+        calibration,
+        "get_monthly_transition_matrix_with_fallback",
+        fake_monthly_matrix,
+    )
 
     scenarios = generate_calibrated_monte_carlo_scenarios(
         start_date="2024-07-01",
         num_days=5,
-        num_simulations=50,
+        num_simulations=10,
         initial_state="drizzle",
         random_seed=42,
         rainfall_data=rainfall_data,
@@ -277,7 +305,7 @@ def test_calibrated_monte_carlo_forecast_does_not_change_day_zero():
     )
 
     for scenario in scenarios:
-        assert scenario[0]["rainfall_state"] == "drizzle"
+        assert scenario[0]["rainfall_state"] == "rain"
 
 
 def test_calibrated_monte_carlo_requires_forecast_weight():
@@ -331,8 +359,8 @@ def test_calibrated_monte_carlo_rejects_missing_forecast_date():
     rainfall_data = _make_rainfall_data()
 
     forecast = _make_forecast(
-        start_date="2024-07-01",
-        num_days=4,
+        start_date="2024-07-02",
+        num_days=3,
     )
 
     with pytest.raises(ValueError):
@@ -346,6 +374,7 @@ def test_calibrated_monte_carlo_rejects_missing_forecast_date():
             forecast=forecast,
             forecast_weight=0.5,
         )
+
 
 def test_forecast_probability_changes_monte_carlo_distribution():
     rainfall_data = _make_rainfall_data()
@@ -391,3 +420,25 @@ def test_forecast_probability_changes_monte_carlo_distribution():
     wet_wet_days = wet_day_count(wet_scenarios)
 
     assert wet_wet_days > dry_wet_days
+
+
+def test_generate_markov_states_transitions_on_first_day():
+
+    transition_matrix = [
+        [0.0, 0.0, 1.0],  # dry -> rain
+        [1.0, 0.0, 0.0],  # drizzle -> dry
+        [0.0, 1.0, 0.0],  # rain -> drizzle
+    ]
+
+    states = generate_markov_states(
+        transition_matrix=transition_matrix,
+        num_days=3,
+        initial_state="dry",
+        random_seed=42,
+    )
+
+    assert states == [
+        "rain",
+        "drizzle",
+        "dry",
+    ]

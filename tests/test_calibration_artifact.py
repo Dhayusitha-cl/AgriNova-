@@ -489,7 +489,7 @@ def test_monte_carlo_can_consume_calibration_artifact(tmp_path):
     assert all(len(scenario) == 7 for scenario in scenarios)
 
     for scenario in scenarios:
-        assert scenario[0]["rainfall_state"] == "dry"
+        assert scenario[0]["date"] == "2021-06-15"
 
         for day in scenario:
             assert day["rainfall_state"] in {
@@ -497,6 +497,7 @@ def test_monte_carlo_can_consume_calibration_artifact(tmp_path):
                 "drizzle",
                 "rain",
             }
+
             assert day["rainfall_mm"] >= 0
 
 def test_monte_carlo_rejects_invalid_calibration_artifact():
