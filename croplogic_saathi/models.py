@@ -78,5 +78,7 @@ class DecisionResult(BaseModel):
     num_simulations: int
     days_to_simulate: int
     trace: DecisionTrace
+    sowing_eligibility: dict = Field(default_factory=dict)
+    crop_eligibility: dict = Field(default_factory=dict)
     assumptions: Assumptions
     decision_separation: float

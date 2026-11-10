@@ -185,6 +185,31 @@ def test_unexpected_decision_error_returns_500(monkeypatch):
         "message": "Internal server error while processing the decision.",
     }
 
+
+
+def test_no_eligible_decision_returns_400(monkeypatch):
+    def failing_decision(**kwargs):
+        raise ValueError(
+            "No eligible sowing decision is available."
+        )
+
+    monkeypatch.setattr(
+        "api.make_decision",
+        failing_decision,
+    )
+
+    response = client.post(
+        "/api/v1/decision",
+        json=valid_payload(),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == {
+        "code": "DECISION_VALIDATION_ERROR",
+        "message": "No eligible sowing decision is available.",
+    }
+
+
 def test_decision_success_with_production_calibration():
     payload = valid_payload()
 

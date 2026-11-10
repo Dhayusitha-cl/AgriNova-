@@ -14,7 +14,7 @@ Simulation probabilities are estimates, not guarantees.
 
 import math
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import numpy as np
 
@@ -564,6 +564,18 @@ def _assess_crop_eligibility(crop_name, start_date=None):
         ),
     }
 
+def _add_days_to_date(value, days):
+    """Return a date after adding calendar days."""
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        value = value.date()
+    elif not isinstance(value, date):
+        value = date.fromisoformat(str(value))
+
+    return value + timedelta(days=days)
+
 
 def make_decision(
     crop_name,
@@ -649,6 +661,24 @@ def make_decision(
         raise ValueError(
             "forecast_weight cannot be provided without forecast."
         )
+
+    sow_eligibility = _assess_crop_eligibility(
+        crop_name,
+        start_date=start_date,
+    )
+
+    wait_days = 5
+
+    wait_sowing_date = _add_days_to_date(
+        start_date,
+        wait_days,
+    )
+
+    wait_eligibility = _assess_crop_eligibility(
+        crop_name,
+        start_date=wait_sowing_date,
+    )
+
     # =========================================================
     # INITIAL WEATHER STATE
     # =========================================================
@@ -835,6 +865,8 @@ def make_decision(
         rainfall_yesterday_mm=rainfall_yesterday_mm,
         current_moisture_mm=current_moisture_mm,
         switch_probabilities=alternative_probabilities,
+        sow_eligible=sow_eligibility["eligible"],
+        wait_eligible=wait_eligibility["eligible"],
     )
 
     decision_separation = _calculate_decision_separation(
@@ -953,6 +985,18 @@ def make_decision(
         "days_to_simulate": int(
             days_to_simulate
         ),
+
+        "sowing_eligibility": {
+            "sow_today": sow_eligibility,
+            "wait": {
+                **wait_eligibility,
+                "proposed_sowing_date": (
+                    wait_sowing_date.isoformat()
+                    if wait_sowing_date is not None
+                    else None
+                ),
+            },
+        },
 
         "assumptions": {
             "daily_et_mm": 5.0,

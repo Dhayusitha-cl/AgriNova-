@@ -209,6 +209,8 @@ class DecisionResponse(BaseModel):
     assumptions: Assumptions
     soil_moisture_today: MoistureSummary
     soil_moisture_wait: MoistureSummary
+    sowing_eligibility: dict = Field(default_factory=dict)
+    crop_eligibility: dict = Field(default_factory=dict)
     trace: DecisionTrace
     decision_separation: float
 
@@ -528,6 +530,8 @@ def decision(request: DecisionRequest):
         "num_simulations": result["num_simulations"],
         "days_to_simulate": result["days_to_simulate"],
         "assumptions": result["assumptions"],
+        "sowing_eligibility": result["sowing_eligibility"],
+        "crop_eligibility": result["crop_eligibility"],
         "trace": trace,
         "decision_separation": result["decision_separation"],
 

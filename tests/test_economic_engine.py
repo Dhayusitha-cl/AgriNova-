@@ -671,3 +671,38 @@ def test_legacy_mode_excludes_primary_soybean_from_switch():
         "Sow Today",
         "Wait 5 Days",
     }
+
+
+def test_compare_all_decisions_handles_one_eligible_option():
+    result = compare_all_decisions(
+        crop_name="cotton",
+        soil_type="medium_black",
+        germ_prob_today=0.8,
+        germ_prob_wait=0.7,
+        switch_probabilities={},
+        sow_eligible=True,
+        wait_eligible=False,
+    )
+
+    assert len(result["all_decisions"]) == 1
+    assert result["best_decision"] == "Sow Today"
+    assert (
+        result["all_decisions"][0]["advantage_over_others"]
+        == 0.0
+    )
+
+
+def test_compare_all_decisions_rejects_no_eligible_options():
+    with pytest.raises(
+        ValueError,
+        match="No eligible sowing decision is available",
+    ):
+        compare_all_decisions(
+            crop_name="cotton",
+            soil_type="medium_black",
+            germ_prob_today=0.8,
+            germ_prob_wait=0.7,
+            switch_probabilities={},
+            sow_eligible=False,
+            wait_eligible=False,
+        )

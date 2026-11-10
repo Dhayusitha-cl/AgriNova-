@@ -509,6 +509,8 @@ def compare_all_decisions(
     current_moisture_mm=0.0,
     *,
     switch_probabilities=None,
+    sow_eligible=True,
+    wait_eligible=True,
 ):
     """
     Compare sowing today, waiting five days, and eligible
@@ -593,29 +595,43 @@ def compare_all_decisions(
     else:
         switch = None
 
-    decisions = [
-        sow_today,
-        wait,
-        *switch_options.values(),
-    ]
+    decisions = []
+
+    if sow_eligible:
+        decisions.append(sow_today)
+
+    if wait_eligible:
+        decisions.append(wait)
+
+    decisions.extend(switch_options.values())
+
+    if not decisions:
+        raise ValueError(
+            "No eligible sowing decision is available."
+        )
 
     best_decision = max(
         decisions,
         key=lambda result: result["expected_profit"],
     )
 
-    for decision_result in decisions:
 
+    for decision_result in decisions:
         other_profits = [
             other["expected_profit"]
             for other in decisions
             if other is not decision_result
         ]
 
-        decision_result["advantage_over_others"] = float(
-            decision_result["expected_profit"]
-            - max(other_profits)
+        decision_result["advantage_over_others"] = (
+            float(
+                decision_result["expected_profit"]
+                - max(other_profits)
+            )
+            if other_profits
+            else 0.0
         )
+
 
     return {
         "sow_today": sow_today,

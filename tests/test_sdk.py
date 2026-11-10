@@ -513,6 +513,17 @@ def test_sdk_and_api_return_same_public_decision_contract():
     assert "soil_moisture_today" in api_result
     assert "soil_moisture_wait" in api_result
 
+    assert (
+        sdk_result.sowing_eligibility
+        == api_result["sowing_eligibility"]
+    )
+
+    assert (
+        sdk_result.crop_eligibility
+        == api_result["crop_eligibility"]
+    )
+
+
 def test_sdk_rejects_unknown_crop():
     with pytest.raises(ValueError, match="Unknown crop"):
         CropLogicClient().assess_sowing(
@@ -690,3 +701,24 @@ def test_sdk_rejects_non_finite_numeric_inputs(field, value):
 
     with pytest.raises(ValueError):
         client.assess_sowing(**kwargs)
+
+
+
+def test_sdk_returns_crop_eligibility():
+    result = CropLogicClient().assess_sowing(
+        location_id="yavatmal",
+        crop_name="cotton",
+        soil_type="medium_black",
+        current_moisture_mm=35.0,
+        rainfall_yesterday_mm=12.0,
+        start_date="2024-06-15",
+        num_simulations=10,
+        days_to_simulate=7,
+    )
+
+    assert result.sowing_eligibility
+    assert "sow_today" in result.sowing_eligibility
+    assert "wait" in result.sowing_eligibility
+
+    assert result.crop_eligibility
+    assert "cotton" in result.crop_eligibility
