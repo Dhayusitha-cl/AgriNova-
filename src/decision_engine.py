@@ -26,7 +26,7 @@ from .monte_carlo_weather import (
 )
 from .soil_water import simulate_soil_water
 from .crop_establishment import evaluate_establishment
-from .economic_engine import compare_all_decisions
+from .economic_engine import compare_all_decisions, WAIT_DAYS
 from .rainfall_states import classify_rainfall
 
 from .forecast import WeatherForecast
@@ -667,7 +667,7 @@ def make_decision(
         start_date=start_date,
     )
 
-    wait_days = 5
+    wait_days = WAIT_DAYS
 
     wait_sowing_date = _add_days_to_date(
         start_date,
@@ -755,7 +755,7 @@ def make_decision(
     # WAIT 5 DAYS
     # =========================================================
 
-    wait_days = 5
+    wait_days = WAIT_DAYS
 
     # We need enough days for:
     #
@@ -1010,9 +1010,11 @@ def make_decision(
             ),
 
             "confidence_definition": (
-                "Probability separation between the "
-                "best and second-best option; not a "
-                "statistical confidence interval."
+                "Legacy separation score calculated from the fixed "
+                "sow-today, wait, and soybean establishment probabilities. "
+                "It is not a statistical confidence interval, does not "
+                "represent recommendation confidence, and does not "
+                "account for decision eligibility."
             ),
 
             "decision_separation_definition": (

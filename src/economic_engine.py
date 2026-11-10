@@ -329,7 +329,8 @@ def _calculate_wait(
     else:
         risk_level = "High"
 
-    # Worst case remains a simple late-soybean recovery scenario.
+    # Simplified establishment-failure outcome (seed cost only);
+    # not a comprehensive worst-case farm-profit estimate.
     worst_case_profit = -crop["seed_cost_per_acre"]
 
     # Best case is successful establishment of the delayed crop.

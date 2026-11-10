@@ -518,71 +518,60 @@ if st.button(
         # ECONOMIC COMPARISON
         # ====================================================
 
-        economic = result.get(
-            "economic_comparison"
-        )
+        economic = result.get("economic_comparison")
 
         if economic:
+            st.subheader("Economic Comparison")
 
-            st.subheader(
-                "💰 Economic Comparison"
-            )
+            all_decisions = economic.get("all_decisions", [])
 
-            eco_col1, eco_col2, eco_col3 = st.columns(3)
+            if all_decisions:
+                best_decision = economic.get("best_decision")
+                best_profit = economic.get("best_profit", 0)
 
-            sow_today = economic.get(
-                "sow_today",
-                {},
-            )
-
-            wait = economic.get(
-                "wait",
-                {},
-            )
-
-            switch = economic.get(
-                "switch",
-                {},
-            )
-
-            with eco_col1:
-
-                st.metric(
-                    "Sow Today",
-                    f"₹{sow_today.get('expected_profit', 0):,.0f}",
+                st.caption(
+                    "Only decisions eligible for the current "
+                    "assessment are included."
                 )
 
-            with eco_col2:
+                columns = st.columns(len(all_decisions))
 
-                st.metric(
-                    "Wait 5 Days",
-                    f"₹{wait.get('expected_profit', 0):,.0f}",
+                for column, outcome in zip(columns, all_decisions):
+                    decision_name = outcome.get("decision", "Unknown")
+                    expected_profit = outcome.get("expected_profit", 0)
+                    success_probability = outcome.get(
+                        "success_probability", 0
+                    )
+                    risk_level = outcome.get("risk_level", "Unknown")
+
+                    with column:
+                        st.metric(
+                            label=decision_name,
+                            value=f"\u20B9{expected_profit:,.0f}",
+                        )
+
+                        st.caption(
+                            f"Establishment probability: "
+                            f"{success_probability:.1%}"
+                        )
+
+                        st.caption(f"Risk level: {risk_level}")
+
+                        if decision_name == best_decision:
+                            st.success("Highest expected profit")
+
+                if best_decision:
+                    st.info(
+                        f"Economic recommendation: **{best_decision}** "
+                        f"with expected profit of **\u20B9{best_profit:,.0f}**."
+                    )
+
+            else:
+                st.warning(
+                    "No eligible economic decisions were returned "
+                    "for this assessment."
                 )
 
-            with eco_col3:
-
-                st.metric(
-                    "Switch Crop",
-                    f"₹{switch.get('expected_profit', 0):,.0f}",
-                )
-
-            best_decision = economic.get(
-                "best_decision"
-            )
-
-            best_profit = economic.get(
-                "best_profit",
-                0,
-            )
-
-            if best_decision:
-
-                st.info(
-                    f"💡 Economic recommendation: "
-                    f"**{best_decision}** "
-                    f"with expected profit of "
-                    f"**₹{best_profit:,.0f}**."
-                )
 
 
         # ====================================================
