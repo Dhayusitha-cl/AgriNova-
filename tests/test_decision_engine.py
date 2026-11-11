@@ -151,12 +151,14 @@ def test_make_decision_returns_valid_recommendation():
         num_simulations=30,
         days_to_simulate=14,
         random_seed=42,
+        start_date="2024-07-01",
     )
 
     assert result["decision"] in {
         "SOW TODAY",
         "WAIT 5 DAYS",
         "SWITCH TO SOYBEAN",
+        "SWITCH TO SORGHUM",
     }
 
 
@@ -345,6 +347,7 @@ def test_final_decision_matches_economic_best_decision():
         num_simulations=20,
         days_to_simulate=14,
         random_seed=42,
+        start_date="2024-07-01",
     )
 
     economic_best = result["economic_comparison"]["best_decision"]
@@ -353,6 +356,7 @@ def test_final_decision_matches_economic_best_decision():
         "Sow Today": "SOW TODAY",
         "Wait 5 Days": "WAIT 5 DAYS",
         "Switch to Soybean": "SWITCH TO SOYBEAN",
+        "Switch to Sorghum": "SWITCH TO SORGHUM",
     }
 
     assert result["decision"] == mapping[economic_best]
@@ -773,7 +777,7 @@ def test_crop_eligibility_outside_configured_window():
 def test_crop_eligibility_without_date_is_unassessed():
     result = _assess_crop_eligibility("soybean")
 
-    assert result["eligible"] is True
+    assert result["eligible"] is None
     assert result["status"] == "timing_unassessed"
     assert "could not be assessed" in result["reason"]
 
@@ -824,6 +828,68 @@ def test_crop_eligibility_accepts_date_object():
     )
 
     assert result["eligible"] is True
+
+
+
+def test_crop_eligibility_accepts_start_and_end_boundaries():
+    start = _assess_crop_eligibility(
+        "cotton",
+        start_date="2024-06-15",
+    )
+    end = _assess_crop_eligibility(
+        "cotton",
+        start_date="2024-07-15",
+    )
+
+    assert start["eligible"] is True
+    assert end["eligible"] is True
+
+
+def test_crop_eligibility_accepts_datetime():
+    from datetime import datetime
+
+    result = _assess_crop_eligibility(
+        "soybean",
+        start_date=datetime(2024, 7, 1, 10, 30),
+    )
+
+    assert result["eligible"] is True
+
+
+def test_crop_eligibility_rejects_missing_window(monkeypatch):
+    from src import decision_engine
+
+    monkeypatch.delitem(
+        decision_engine.crops["soybean"],
+        "optimal_sowing_window",
+    )
+
+    result = _assess_crop_eligibility(
+        "soybean",
+        start_date="2024-07-01",
+    )
+
+    assert result["eligible"] is False
+    assert result["status"] == "missing_window"
+
+
+def test_crop_eligibility_rejects_malformed_window(monkeypatch):
+    from src import decision_engine
+
+    monkeypatch.setitem(
+        decision_engine.crops["soybean"],
+        "optimal_sowing_window",
+        "Monsoon season",
+    )
+
+    result = _assess_crop_eligibility(
+        "soybean",
+        start_date="2024-07-01",
+    )
+
+    assert result["eligible"] is False
+    assert result["status"] == "invalid_window"
+
 
 
 def test_decision_separation_uses_top_two_profits():

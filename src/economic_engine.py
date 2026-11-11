@@ -35,6 +35,21 @@ from src.soil_data import soils
 WAIT_DAYS = 5
 
 
+class NoEligibleDecisionError(ValueError):
+    """Raised when no sowing action is eligible for assessment."""
+
+    def __init__(
+        self,
+        message="No eligible sowing decision is available.",
+        *,
+        sowing_eligibility=None,
+        crop_eligibility=None,
+    ):
+        super().__init__(message)
+
+        self.sowing_eligibility = sowing_eligibility
+        self.crop_eligibility = crop_eligibility
+
 
 # ---------------------------------------------------------------------
 # Validation
@@ -607,9 +622,7 @@ def compare_all_decisions(
     decisions.extend(switch_options.values())
 
     if not decisions:
-        raise ValueError(
-            "No eligible sowing decision is available."
-        )
+        raise NoEligibleDecisionError()
 
     best_decision = max(
         decisions,

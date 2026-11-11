@@ -26,7 +26,11 @@ from .monte_carlo_weather import (
 )
 from .soil_water import simulate_soil_water
 from .crop_establishment import evaluate_establishment
-from .economic_engine import compare_all_decisions, WAIT_DAYS
+from .economic_engine import (
+    compare_all_decisions,
+    NoEligibleDecisionError,
+    WAIT_DAYS,
+)
 from .rainfall_states import classify_rainfall
 
 from .forecast import WeatherForecast
@@ -470,7 +474,7 @@ def _assess_crop_eligibility(crop_name, start_date=None):
 
     if start_date is None:
         return {
-            "eligible": True,
+            "eligible": None,
             "status": "timing_unassessed",
             "reason": (
                 "No start_date supplied; sowing-window eligibility "
@@ -837,7 +841,7 @@ def make_decision(
         )
         crop_eligibility[candidate] = eligibility
 
-        if not eligibility["eligible"]:
+        if eligibility["eligible"] is not True:
             continue
 
         probability, trajectories_for_crop = (
@@ -856,18 +860,32 @@ def make_decision(
     # ECONOMIC COMPARISON
     # =========================================================
 
-    economic_comparison = compare_all_decisions(
-        crop_name=crop_name,
-        soil_type=soil_type,
-        germ_prob_today=germ_prob_today,
-        germ_prob_wait=germ_prob_wait,
-        germ_prob_soybean=germ_prob_soybean,
-        rainfall_yesterday_mm=rainfall_yesterday_mm,
-        current_moisture_mm=current_moisture_mm,
-        switch_probabilities=alternative_probabilities,
-        sow_eligible=sow_eligibility["eligible"],
-        wait_eligible=wait_eligibility["eligible"],
-    )
+    try:
+        economic_comparison = compare_all_decisions(
+            crop_name=crop_name,
+            soil_type=soil_type,
+            germ_prob_today=germ_prob_today,
+            germ_prob_wait=germ_prob_wait,
+            germ_prob_soybean=germ_prob_soybean,
+            rainfall_yesterday_mm=rainfall_yesterday_mm,
+            current_moisture_mm=current_moisture_mm,
+            switch_probabilities=alternative_probabilities,
+            # Unknown timing eligibility must not block primary-crop
+            # assessment when no start date was supplied.
+            # Explicitly ineligible actions remain excluded.
+            sow_eligible=sow_eligibility["eligible"] is not False,
+            wait_eligible=wait_eligibility["eligible"] is not False,
+        )
+
+    except NoEligibleDecisionError as exc:
+        raise NoEligibleDecisionError(
+            str(exc),
+            sowing_eligibility={
+                "sow_today": sow_eligibility,
+                "wait": wait_eligibility,
+            },
+            crop_eligibility=crop_eligibility,
+        ) from exc
 
     decision_separation = _calculate_decision_separation(
         economic_comparison["all_decisions"]
