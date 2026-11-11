@@ -65,6 +65,7 @@ class CalibrationArtifact:
     monthly_transition_matrices: dict[int, np.ndarray]
     rainfall_samples: dict[tuple[int, str], np.ndarray]
     fallback_transition_matrix: np.ndarray
+    source_file_hashes: dict[str, str] | None = None
 
     def content_hash(self) -> str:
         """
@@ -173,6 +174,33 @@ class CalibrationArtifact:
                         f"Rainfall samples for {key} contain "
                         "negative rainfall."
                     )
+        if self.source_file_hashes is not None:
+            if not isinstance(self.source_file_hashes, dict):
+                raise ValueError(
+                    "source_file_hashes must be a dictionary."
+                )
+
+            if set(self.source_file_hashes) != set(self.source_files):
+                raise ValueError(
+                    "source_file_hashes must contain exactly the "
+                    "artifact source filenames."
+                )
+
+            for filename, digest in self.source_file_hashes.items():
+                if (
+                    not isinstance(filename, str)
+                    or not filename.strip()
+                    or not isinstance(digest, str)
+                    or len(digest) != 64
+                    or any(
+                        character not in "0123456789abcdef"
+                        for character in digest
+                    )
+                ):
+                    raise ValueError(
+                        "Each source file hash must be a lowercase "
+                        "64-character SHA-256 hexadecimal digest."
+                    )
 
     @staticmethod
     def _validate_matrix(
@@ -214,7 +242,8 @@ class CalibrationArtifact:
 
         self.validate()
 
-        return {
+        payload = {
+            # Keep every existing field exactly as it is.
             "schema_version": ARTIFACT_SCHEMA_VERSION,
             "source_dataset": self.source_dataset,
             "preprocessing_version": self.preprocessing_version,
@@ -239,6 +268,13 @@ class CalibrationArtifact:
                 in self.rainfall_samples.items()
             },
         }
+
+        if self.source_file_hashes is not None:
+            payload["source_file_hashes"] = dict(
+                sorted(self.source_file_hashes.items())
+            )
+
+        return payload
 
     def save(self, path: str | Path) -> None:
         """Save the artifact as JSON."""
@@ -313,6 +349,7 @@ class CalibrationArtifact:
             calibration_method_version=data["calibration_method_version"],
             monthly_transition_matrices=monthly_matrices,
             rainfall_samples=rainfall_samples,
+            source_file_hashes=data.get("source_file_hashes"),
             fallback_transition_matrix=np.asarray(
                 data["fallback_transition_matrix"],
                 dtype=float,

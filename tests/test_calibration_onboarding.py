@@ -22,18 +22,204 @@ def _write_raw_file(raw_dir: Path, year: int) -> None:
 
 
 def _processed_dataframe(
+    year: int = 2024,
     latitude: float = 20.50,
     longitude: float = 78.25,
 ) -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "date": pd.to_datetime(["2024-06-01"]),
+            "date": pd.to_datetime([f"{year}-06-01"]),
             "rainfall_mm": [10.0],
             "latitude": [latitude],
             "longitude": [longitude],
             "rainfall_state": ["rain"],
         }
     )
+
+
+def test_onboard_calibration_rejects_missing_processed_csv(
+    tmp_path,
+    monkeypatch,
+):
+    raw_dir = tmp_path / "raw"
+    processed_dir = tmp_path / "processed"
+    output_path = tmp_path / "calibration.json"
+
+    raw_dir.mkdir()
+    processed_dir.mkdir()
+
+    def fake_process_year(
+        year,
+        *,
+        latitude,
+        longitude,
+        location_id,
+        raw_dir,
+        processed_dir,
+    ):
+        # Return data but deliberately do not create the expected CSV.
+        return _processed_dataframe(year=year)
+
+    def fail_if_called(**kwargs):
+        pytest.fail(
+            "Artifact builder must not run when the processed CSV is missing."
+        )
+
+    monkeypatch.setattr(
+        onboarding,
+        "process_year",
+        fake_process_year,
+    )
+    monkeypatch.setattr(
+        onboarding,
+        "build_and_save_calibration_artifact",
+        fail_if_called,
+    )
+
+    with pytest.raises(
+        FileNotFoundError,
+        match="Expected processed rainfall file was not created",
+    ):
+        onboarding.onboard_calibration(
+            location_id="test_location",
+            latitude=20.39,
+            longitude=78.13,
+            start_year=2024,
+            end_year=2024,
+            output_path=output_path,
+            raw_dir=raw_dir,
+            processed_dir=processed_dir,
+        )
+
+    assert not output_path.exists()
+
+
+def test_onboard_calibration_rejects_corrupted_processed_csv(
+    tmp_path,
+    monkeypatch,
+):
+    raw_dir = tmp_path / "raw"
+    processed_dir = tmp_path / "processed"
+    output_path = tmp_path / "calibration.json"
+
+    raw_dir.mkdir()
+    processed_dir.mkdir()
+
+    def fake_process_year(
+        year,
+        *,
+        latitude,
+        longitude,
+        location_id,
+        raw_dir,
+        processed_dir,
+    ):
+        processed_file = (
+            processed_dir / f"rainfall_{location_id}_{year}.csv"
+        )
+
+        # Deliberately omit required coordinate columns.
+        processed_file.write_text(
+            "date,rainfall_mm\n2024-06-01,10.0\n",
+            encoding="utf-8",
+        )
+
+        return _processed_dataframe(year=year)
+
+    def fail_if_called(**kwargs):
+        pytest.fail(
+            "Artifact builder must not run when the processed CSV is invalid."
+        )
+
+    monkeypatch.setattr(
+        onboarding,
+        "process_year",
+        fake_process_year,
+    )
+    monkeypatch.setattr(
+        onboarding,
+        "build_and_save_calibration_artifact",
+        fail_if_called,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="missing required columns",
+    ):
+        onboarding.onboard_calibration(
+            location_id="test_location",
+            latitude=20.39,
+            longitude=78.13,
+            start_year=2024,
+            end_year=2024,
+            output_path=output_path,
+            raw_dir=raw_dir,
+            processed_dir=processed_dir,
+        )
+
+    assert not output_path.exists()
+
+
+def test_onboard_calibration_propagates_artifact_builder_failure(
+    tmp_path,
+    monkeypatch,
+):
+    raw_dir = tmp_path / "raw"
+    processed_dir = tmp_path / "processed"
+    output_path = tmp_path / "calibration.json"
+
+    raw_dir.mkdir()
+    processed_dir.mkdir()
+
+    def fake_process_year(
+        year,
+        *,
+        latitude,
+        longitude,
+        location_id,
+        raw_dir,
+        processed_dir,
+    ):
+        dataframe = _processed_dataframe(year=year)
+
+        dataframe.to_csv(
+            processed_dir / f"rainfall_{location_id}_{year}.csv",
+            index=False,
+        )
+
+        return dataframe
+
+    def fail_builder(**kwargs):
+        raise RuntimeError("simulated artifact builder failure")
+
+    monkeypatch.setattr(
+        onboarding,
+        "process_year",
+        fake_process_year,
+    )
+    monkeypatch.setattr(
+        onboarding,
+        "build_and_save_calibration_artifact",
+        fail_builder,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="simulated artifact builder failure",
+    ):
+        onboarding.onboard_calibration(
+            location_id="test_location",
+            latitude=20.39,
+            longitude=78.13,
+            start_year=2024,
+            end_year=2024,
+            output_path=output_path,
+            raw_dir=raw_dir,
+            processed_dir=processed_dir,
+        )
+
+    assert not output_path.exists()
+
 
 
 def test_onboard_calibration_builds_artifact_and_returns_metadata(
@@ -63,7 +249,12 @@ def test_onboard_calibration_builds_artifact_and_returns_metadata(
     ):
         processed_calls.append(year)
 
-        dataframe = _processed_dataframe()
+        dataframe = _processed_dataframe(
+            year=year,
+            latitude=20.50,
+            longitude=78.25,
+        )
+
         dataframe.to_csv(
             processed_dir / f"rainfall_{location_id}_{year}.csv",
             index=False,
@@ -184,8 +375,9 @@ def test_onboard_calibration_rejects_inconsistent_climate_grids(
     ):
         grid_latitude, grid_longitude = grids[year]
         dataframe = _processed_dataframe(
-            grid_latitude,
-            grid_longitude,
+            year=year,
+            latitude=grid_latitude,
+            longitude=grid_longitude,
         )
 
         dataframe.to_csv(
@@ -315,7 +507,7 @@ def test_onboard_calibration_does_not_include_processed_years_outside_range(
         raw_dir,
         processed_dir,
     ):
-        dataframe = _processed_dataframe()
+        dataframe = _processed_dataframe(year=year)
 
         dataframe.to_csv(
             processed_dir / f"rainfall_{location_id}_{year}.csv",

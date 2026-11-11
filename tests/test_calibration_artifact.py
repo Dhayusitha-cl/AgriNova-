@@ -1,3 +1,4 @@
+import hashlib
 import numpy as np
 import pandas as pd
 import pytest
@@ -533,6 +534,125 @@ def test_build_calibration_artifact_contains_provenance(tmp_path):
         artifact.calibration_method_version
         == CALIBRATION_METHOD_VERSION
     )
+
+
+
+def test_legacy_artifact_without_source_hashes_remains_compatible():
+    artifact = make_test_artifact()
+
+    data = artifact.to_dict()
+
+    assert "source_file_hashes" not in data
+
+    loaded = CalibrationArtifact.from_dict(data)
+
+    assert loaded.source_file_hashes is None
+    assert loaded.content_hash() == artifact.content_hash()
+
+
+def test_source_file_hashes_survive_save_and_load(tmp_path):
+    artifact = make_test_artifact()
+
+    artifact.source_file_hashes = {
+        filename: hashlib.sha256(
+            filename.encode("utf-8")
+        ).hexdigest()
+        for filename in artifact.source_files
+    }
+
+    path = tmp_path / "calibration.json"
+    artifact.save(path)
+
+    loaded = CalibrationArtifact.load(path)
+
+    assert loaded.source_file_hashes == artifact.source_file_hashes
+    assert loaded.content_hash() == artifact.content_hash()
+
+
+def test_build_calibration_artifact_hashes_actual_source_files(tmp_path):
+    data_dir = make_processed_rainfall_files(tmp_path)
+
+    artifact = build_calibration_artifact(
+        data_dir=data_dir,
+        pattern="rainfall_test_*.csv",
+        location="test_location",
+    )
+
+    assert artifact.source_file_hashes is not None
+
+    for filename in artifact.source_files:
+        expected_hash = hashlib.sha256(
+            (data_dir / filename).read_bytes()
+        ).hexdigest()
+
+        assert artifact.source_file_hashes[filename] == expected_hash
+
+
+def test_source_file_hashes_reject_missing_filename():
+    artifact = make_test_artifact()
+
+    artifact.source_file_hashes = {
+        artifact.source_files[0]: "a" * 64,
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="exactly the artifact source filenames",
+    ):
+        artifact.validate()
+
+
+def test_source_file_hashes_reject_extra_filename():
+    artifact = make_test_artifact()
+
+    artifact.source_file_hashes = {
+        filename: "a" * 64
+        for filename in artifact.source_files
+    }
+    artifact.source_file_hashes["unexpected.csv"] = "b" * 64
+
+    with pytest.raises(
+        ValueError,
+        match="exactly the artifact source filenames",
+    ):
+        artifact.validate()
+
+
+@pytest.mark.parametrize(
+    "invalid_digest",
+    [
+        "abc",
+        "g" * 64,
+        "A" * 64,
+        " " * 64,
+    ],
+)
+def test_source_file_hashes_reject_invalid_digests(invalid_digest):
+    artifact = make_test_artifact()
+
+    artifact.source_file_hashes = {
+        filename: invalid_digest
+        for filename in artifact.source_files
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="lowercase 64-character SHA-256",
+    ):
+        artifact.validate()
+
+
+def test_source_file_hashes_reject_non_dictionary():
+    artifact = make_test_artifact()
+    artifact.source_file_hashes = ["a" * 64]
+
+    with pytest.raises(
+        ValueError,
+        match="source_file_hashes must be a dictionary",
+    ):
+        artifact.validate()
+
+
 
 def test_build_calibration_artifact_rejects_missing_calendar_day(
     tmp_path,

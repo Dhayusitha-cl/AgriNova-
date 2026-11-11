@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 import os
 import tempfile
+import hashlib
 
 import pandas as pd
 
@@ -141,6 +142,13 @@ def build_calibration_artifact(
         if path.is_file()
     )
 
+    source_file_hashes = {
+        filename: hashlib.sha256(
+            (data_dir / filename).read_bytes()
+        ).hexdigest()
+        for filename in source_files
+    }
+
     _validate_calibration_source_coverage(
         rainfall_data,
         source_files,
@@ -209,6 +217,7 @@ def build_calibration_artifact(
         monthly_transition_matrices=monthly_transition_matrices,
         rainfall_samples=rainfall_samples,
         fallback_transition_matrix=fallback_matrix,
+        source_file_hashes=source_file_hashes,
     )
 
     artifact.validate()

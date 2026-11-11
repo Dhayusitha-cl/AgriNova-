@@ -8,6 +8,10 @@ calibration artifacts for production use.
 
 from __future__ import annotations
 
+import math
+import re
+
+import pandas as pd
 import json
 import shutil
 import tempfile
@@ -26,6 +30,182 @@ from src.process_imd_years import (
 
 DEFAULT_RAW_DIR = Path("data/raw")
 DEFAULT_PROCESSED_DIR = Path("data/processed")
+
+
+def _validate_location_and_coordinates(
+    location_id: str,
+    latitude: float,
+    longitude: float,
+) -> tuple[str, float, float]:
+    """Validate the identifier and requested geographic coordinates."""
+
+    if not isinstance(location_id, str):
+        raise ValueError("location_id must be a string.")
+
+    location_id = location_id.strip().lower()
+
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", location_id):
+        raise ValueError(
+            "location_id must contain only lowercase letters, "
+            "numbers, underscores, and hyphens, and must start "
+            "with a letter or number."
+        )
+
+    try:
+        latitude = float(latitude)
+        longitude = float(longitude)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Latitude and longitude must be numeric."
+        ) from exc
+
+    if not math.isfinite(latitude) or not -90 <= latitude <= 90:
+        raise ValueError("latitude must be finite and between -90 and 90.")
+
+    if not math.isfinite(longitude) or not -180 <= longitude <= 180:
+        raise ValueError(
+            "longitude must be finite and between -180 and 180."
+        )
+
+    return location_id, latitude, longitude
+
+def _get_single_csv_grid_from_dataframe(
+    dataframe: pd.DataFrame,
+    expected_year: int,
+) -> tuple[float, float]:
+    """Check that the returned preprocessing DataFrame matches its CSV."""
+
+    required = {"date", "latitude", "longitude"}
+    missing = required.difference(dataframe.columns)
+
+    if missing or dataframe.empty:
+        raise ValueError(
+            "Preprocessing returned an empty DataFrame or one missing "
+            "date/latitude/longitude columns."
+        )
+
+    dates = pd.to_datetime(dataframe["date"], errors="coerce")
+
+    if dates.isna().any() or not (dates.dt.year == expected_year).all():
+        raise ValueError(
+            f"Preprocessing returned invalid dates for year {expected_year}."
+        )
+
+    latitudes = pd.to_numeric(dataframe["latitude"], errors="coerce")
+    longitudes = pd.to_numeric(dataframe["longitude"], errors="coerce")
+
+    if (
+        latitudes.isna().any()
+        or longitudes.isna().any()
+        or not latitudes.map(math.isfinite).all()
+        or not longitudes.map(math.isfinite).all()
+    ):
+        raise ValueError(
+            "Preprocessing returned invalid climate-grid coordinates."
+        )
+
+    grids = set(
+        zip(
+            latitudes.astype(float),
+            longitudes.astype(float),
+        )
+    )
+
+    if len(grids) != 1:
+        raise ValueError(
+            "Preprocessing returned inconsistent climate grids: "
+            f"{sorted(grids)}"
+        )
+
+    return next(iter(grids))
+
+
+
+def _get_single_csv_grid(
+    processed_file: Path,
+    expected_year: int,
+) -> tuple[float, float]:
+    """
+    Validate the generated CSV's date year and single resolved grid.
+
+    Full daily coverage and rainfall-state validation remain the
+    responsibility of the artifact builder.
+    """
+
+    try:
+        dataframe = pd.read_csv(processed_file)
+    except Exception as exc:
+        raise ValueError(
+            f"Could not read processed rainfall file: {processed_file}"
+        ) from exc
+
+    required = {"date", "latitude", "longitude"}
+    missing = required.difference(dataframe.columns)
+
+    if missing:
+        raise ValueError(
+            f"{processed_file.name} is missing required columns: "
+            + ", ".join(sorted(missing))
+        )
+
+    if dataframe.empty:
+        raise ValueError(
+            f"Processed rainfall file is empty: {processed_file}"
+        )
+
+    dates = pd.to_datetime(dataframe["date"], errors="coerce")
+
+    if dates.isna().any():
+        raise ValueError(
+            f"{processed_file.name} contains invalid dates."
+        )
+
+    if not (dates.dt.year == expected_year).all():
+        raise ValueError(
+            f"{processed_file.name} contains dates outside "
+            f"the requested year {expected_year}."
+        )
+
+    latitude_values = pd.to_numeric(
+        dataframe["latitude"],
+        errors="coerce",
+    )
+    longitude_values = pd.to_numeric(
+        dataframe["longitude"],
+        errors="coerce",
+    )
+
+    if (
+        not latitude_values.map(math.isfinite).all()
+        or not longitude_values.map(math.isfinite).all()
+    ):
+        raise ValueError(
+            f"{processed_file.name} contains invalid coordinates."
+        )
+
+    grids = set(
+        zip(
+            latitude_values.astype(float),
+            longitude_values.astype(float),
+        )
+    )
+
+    if len(grids) != 1:
+        raise ValueError(
+            f"{processed_file.name} contains inconsistent climate grids: "
+            f"{sorted(grids)}"
+        )
+
+    latitude, longitude = next(iter(grids))
+
+    if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+        raise ValueError(
+            "Preprocessing returned coordinates outside "
+            "valid geographic bounds."
+        )
+
+    return latitude, longitude
+
 
 
 def onboard_calibration(
@@ -49,8 +229,21 @@ def onboard_calibration(
     Runtime registry registration remains a separate explicit operation.
     """
 
-    if not isinstance(location_id, str) or not location_id.strip():
-        raise ValueError("location_id must not be empty.")
+    location_id, latitude, longitude = (
+        _validate_location_and_coordinates(
+            location_id,
+            latitude,
+            longitude,
+        )
+    )
+
+    if (
+        isinstance(start_year, bool)
+        or isinstance(end_year, bool)
+        or not isinstance(start_year, int)
+        or not isinstance(end_year, int)
+    ):
+        raise ValueError("start_year and end_year must be integers.")
 
     if start_year > end_year:
         raise ValueError(
@@ -86,12 +279,28 @@ def onboard_calibration(
 
         processed_files.append(processed_file)
 
-        resolved_grids.add(
-            (
-                float(dataframe["latitude"].iloc[0]),
-                float(dataframe["longitude"].iloc[0]),
-            )
+        csv_grid = _get_single_csv_grid(
+            processed_file,
+            expected_year=year,
         )
+
+        if not isinstance(dataframe, pd.DataFrame) or dataframe.empty:
+            raise ValueError(
+                f"Preprocessing returned no valid data for year {year}."
+            )
+
+        returned_grid = _get_single_csv_grid_from_dataframe(
+            dataframe,
+            year,
+        )
+
+        if returned_grid != csv_grid:
+            raise ValueError(
+                f"Preprocessing return data and generated CSV disagree "
+                f"on the climate grid for year {year}."
+            )
+
+        resolved_grids.add(csv_grid)
 
     if len(resolved_grids) != 1:
         raise ValueError(
