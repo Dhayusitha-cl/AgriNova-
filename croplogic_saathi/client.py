@@ -8,6 +8,7 @@ from src.climate_data_provider import create_configured_climate_data_provider
 from src.decision_engine import make_decision
 from src.forecast import WeatherForecast
 from src.location import GeographicLocation
+from src.explanation_engine import generate_decision_explanation
 from src.runtime_calibration import (
     resolve_calibration_resolution_from_provider,
 )
@@ -216,6 +217,11 @@ class CropLogicClient:
         )
 
         result["trace"] = trace
+
+        result["explanation"] = generate_decision_explanation(
+            result,
+            primary_crop=request.crop_name,
+        )
 
         return DecisionResult.model_validate(
             {

@@ -13,6 +13,7 @@ from croplogic_saathi.models import (
     EconomicComparison,
     EconomicOutcome,
     DecisionTrace,
+    DecisionExplanation,
 )
 from src.crop_data import crops
 from src.soil_data import soils
@@ -22,6 +23,8 @@ from src.climate_data_provider import create_configured_climate_data_provider
 from src.location import GeographicLocation
 from src.runtime_calibration import resolve_calibration_resolution_from_provider
 from src.forecast import DailyForecast, WeatherForecast
+from src.economic_engine import NoEligibleDecisionError
+from src.explanation_engine import generate_decision_explanation
 
 
 logger = logging.getLogger("croplogic_saathi")
@@ -213,6 +216,7 @@ class DecisionResponse(BaseModel):
     crop_eligibility: dict = Field(default_factory=dict)
     trace: DecisionTrace
     decision_separation: float
+    explanation: DecisionExplanation
 
 # ---------------------------------------------------------
 # API 1 — HEALTH CHECK
@@ -440,6 +444,10 @@ def decision(request: DecisionRequest):
             forecast=forecast,
             forecast_weight=request.forecast_weight,
         )
+        explanation = generate_decision_explanation(
+            result,
+            primary_crop=request.crop_name,
+        )
 
         trace = DecisionTrace(
             location_id=request.location_id,
@@ -488,6 +496,29 @@ def decision(request: DecisionRequest):
     except HTTPException:
         raise
 
+    except NoEligibleDecisionError as exc:
+        logger.info(
+            "No eligible sowing decision: %s",
+            exc,
+        )
+
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "NO_ELIGIBLE_DECISION",
+                "message": (
+                    "No sowing action is eligible for "
+                    "the selected assessment date."
+                ),
+                "sowing_eligibility": (
+                    exc.sowing_eligibility or {}
+                ),
+                "crop_eligibility": (
+                    exc.crop_eligibility or {}
+                ),
+            },
+        ) from exc
+
     except ValueError as exc:
         logger.warning("Decision validation error: %s", exc)
         raise _api_error(
@@ -534,6 +565,7 @@ def decision(request: DecisionRequest):
         "crop_eligibility": result["crop_eligibility"],
         "trace": trace,
         "decision_separation": result["decision_separation"],
+        "explanation": explanation,
 
         "soil_moisture_today": {
             "mean": trajectories.mean(axis=0).tolist(),

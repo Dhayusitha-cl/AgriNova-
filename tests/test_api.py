@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 from api import DecisionRequest, app
 from datetime import datetime, timedelta
+from src.economic_engine import NoEligibleDecisionError
 
 import pytest
 import json
@@ -41,6 +42,24 @@ def test_decision_success():
     assert response.status_code == 200
 
     data = response.json()
+
+    explanation = data["explanation"]
+
+    assert explanation["recommended_action"] == data["decision"]
+    assert explanation["recommended_crop"] is not None
+
+    if data["decision"].strip().lower().startswith("switch to "):
+        expected_crop = data["decision"].strip()[10:].strip().upper()
+        assert explanation["recommended_crop"] == expected_crop
+    else:
+        assert explanation["recommended_crop"] == "cotton"
+
+    assert explanation["why_recommended"]
+    assert explanation["alternative_comparison"]
+    assert isinstance(explanation["field_observations"], list)
+    assert isinstance(explanation["crop_eligibility"], list)
+    assert isinstance(explanation["sowing_action_eligibility"], list)
+    assert explanation["uncertainties"]
 
     assert "decision" in data
     assert "germ_prob_today" in data
@@ -188,9 +207,29 @@ def test_unexpected_decision_error_returns_500(monkeypatch):
 
 
 def test_no_eligible_decision_returns_400(monkeypatch):
+
     def failing_decision(**kwargs):
-        raise ValueError(
-            "No eligible sowing decision is available."
+        raise NoEligibleDecisionError(
+            sowing_eligibility={
+                "sow_today": {
+                    "eligible": False,
+                    "status": "outside_configured_window",
+                },
+                "wait": {
+                    "eligible": False,
+                    "status": "outside_configured_window",
+                },
+            },
+            crop_eligibility={
+                "soybean": {
+                    "eligible": False,
+                    "status": "outside_configured_window",
+                },
+                "sorghum": {
+                    "eligible": False,
+                    "status": "outside_configured_window",
+                },
+            },
         )
 
     monkeypatch.setattr(
@@ -204,11 +243,16 @@ def test_no_eligible_decision_returns_400(monkeypatch):
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == {
-        "code": "DECISION_VALIDATION_ERROR",
-        "message": "No eligible sowing decision is available.",
-    }
 
+    detail = response.json()["detail"]
+
+    assert detail["code"] == "NO_ELIGIBLE_DECISION"
+
+    assert detail["sowing_eligibility"]["sow_today"]["eligible"] is False
+
+    assert detail["sowing_eligibility"]["wait"]["eligible"] is False
+
+    assert detail["crop_eligibility"]["sorghum"]["eligible"] is False
 
 def test_decision_success_with_production_calibration():
     payload = valid_payload()

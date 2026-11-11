@@ -523,6 +523,12 @@ def test_sdk_and_api_return_same_public_decision_contract():
         == api_result["crop_eligibility"]
     )
 
+    assert (
+        sdk_result.explanation.model_dump()
+        == api_result["explanation"]
+    )
+
+
 
 def test_sdk_rejects_unknown_crop():
     with pytest.raises(ValueError, match="Unknown crop"):
@@ -722,3 +728,26 @@ def test_sdk_returns_crop_eligibility():
 
     assert result.crop_eligibility
     assert "cotton" in result.crop_eligibility
+
+
+def test_sdk_returns_structured_decision_explanation():
+    result = CropLogicClient().assess_sowing(
+        location_id="yavatmal",
+        crop_name="cotton",
+        soil_type="medium_black",
+        current_moisture_mm=35.0,
+        rainfall_yesterday_mm=12.0,
+        start_date="2024-06-15",
+        num_simulations=10,
+        days_to_simulate=7,
+    )
+
+    explanation = result.explanation
+
+    assert explanation.recommended_action == result.decision
+    assert explanation.recommended_crop == "cotton"
+
+    assert explanation.why_recommended
+    assert explanation.alternative_comparison
+    assert isinstance(explanation.field_observations, list)
+    assert explanation.uncertainties

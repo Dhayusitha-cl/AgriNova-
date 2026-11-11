@@ -64,6 +64,46 @@ class DecisionTrace(BaseModel):
     forecast_issued_at: datetime | None = None
     forecast_weight: float | None = None
 
+class ExplanationAlternative(BaseModel):
+    action: str
+    establishment_probability: str
+    expected_profit: str
+    risk_level: str
+    advantage_over_others: str
+
+
+class ExplanationSowingEligibility(BaseModel):
+    crop: str
+    action: str
+    eligible: bool | None = None
+    status: str
+    reason: str = ""
+    proposed_sowing_date: str | None = None
+
+
+class ExplanationCropEligibility(BaseModel):
+    crop: str
+    eligible: bool | None = None
+    status: str
+    reason: str = ""
+
+
+class DecisionExplanation(BaseModel):
+    recommended_action: str
+    recommended_crop: str | None = None
+    why_recommended: list[str] = Field(default_factory=list)
+    alternative_comparison: list[ExplanationAlternative] = Field(
+        default_factory=list
+    )
+    field_observations: list[str] = Field(default_factory=list)
+    crop_eligibility: list[ExplanationCropEligibility] = Field(
+        default_factory=list
+    )
+    sowing_action_eligibility: list[ExplanationSowingEligibility] = Field(
+        default_factory=list
+    )
+    uncertainties: list[str] = Field(default_factory=list)
+
 
 class DecisionResult(BaseModel):
     decision: str
@@ -82,3 +122,4 @@ class DecisionResult(BaseModel):
     crop_eligibility: dict = Field(default_factory=dict)
     assumptions: Assumptions
     decision_separation: float
+    explanation: DecisionExplanation
