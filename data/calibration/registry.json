@@ -1,11 +1,17 @@
 {
-  "schema_version": "1.1",
   "entries": {
+    "coimbatore": {
+      "artifact_hash": "2228070ad99fb8fc456d6f47de12c88c71666f5cce1afdf626f8354f95ebc26e",
+      "artifact_path": "coimbatore_rainfall_calibration_v2.json",
+      "climate_grid_key": "imd_gridded_rainfall:11.00:77.00",
+      "climate_source": "imd_gridded_rainfall"
+    },
     "yavatmal": {
+      "artifact_hash": "7211729434149487a1913e1bfc2ebe77d66b93fa7fdbefb13dc0a74dec63ac4d",
       "artifact_path": "yavatmal_rainfall_calibration_v1.json",
-      "climate_source": "imd_gridded_rainfall",
       "climate_grid_key": "imd_gridded_rainfall:20.50:78.25",
-      "artifact_hash": "7211729434149487a1913e1bfc2ebe77d66b93fa7fdbefb13dc0a74dec63ac4d"
+      "climate_source": "imd_gridded_rainfall"
     }
-  }
+  },
+  "schema_version": "1.1"
 }

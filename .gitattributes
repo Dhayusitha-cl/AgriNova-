@@ -1,0 +1,2 @@
+# Preserve exact source bytes for calibration provenance verification.
+data/processed/rainfall_coimbatore_*.csv -text
